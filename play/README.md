@@ -20,7 +20,7 @@ npm start
 
 Abra <http://localhost:3000>. Na tela inicial:
 
-- **Jogar sozinho com bots** — entra em uma sala e a partida começa na hora (8 jogadores).
+- **Jogar sozinho com bots** — entra em uma sala de 10 jogadores e a partida começa na hora.
 - **Criar sala** — gera um código de 5 letras para você compartilhar.
 - **Entrar** — digite o código da sala de um amigo.
 
@@ -32,17 +32,27 @@ em outro computador na mesma rede.
 | Recurso | Como funciona |
 | --- | --- |
 | **Papéis** | Tripulante ou Impostor. Cada um só vê o próprio papel; impostores se reconhecem. |
-| **Tarefas** | 15 tarefas espalhadas pelas 11 salas. Minigames: fios, cartão, asteroides, scanner, etapas e barra de progresso. |
+| **Tarefas** | As tarefas oficiais do Skeld (dados do repositório Impostor) espalhadas pelas 13 salas. 17 minigames: fios, cartão, asteroides, escanear, inspecionar amostra, enviar dados, desviar energia, filtro de O₂, direção, reator, manifolds, alinhar motor, abastecer, lixo, rota, calibrar distribuidor e multitarefa. |
 | **Barra de tarefas** | Quando todos os tripulantes concluem suas tarefas, eles vencem. |
 | **Impostor** | Matar (com cooldown), dutos e sabotagem. Vence quando os impostores empatam em número com os tripulantes. |
 | **Sabotagem** | Luzes (escurece o mapa), comunicação e reator (se zerar, impostores vencem). Tripulantes consertam na sala certa. |
 | **Corpos** | Quem encontra reporta e abre reunião; o corpo some ao começar a votação. |
-| **Reunião** | Discussão de 30s + votação de 45s, chat e votos anônimos. O mais votado é ejetado. |
+| **Reunião** | Discussão + votação (tempos configuráveis, padrão 15s/120s), chat e votos anônimos. O mais votado é ejetado; empate não ejeta ninguém. |
 | **Emergência** | Botão na Cafeteria, 1 vez por partida (configurável). |
 | **Bots** | Preenchem a sala, fazem tarefas, matam, reportam, consertam sabotagem e votam. |
 | **Mapa** | Mini-mapa + mapa completo no canvas, com escuridão quando as luzes são cortadas. |
 | **Fantasmas** | Jogadores mortos continuam vendo o mapa e a votação (não podem votar). |
-| **Controles** | WASD / setas no teclado, ou arraste o dedo na tela (celular). |
+| **Controles** | **WASD** ou **setas** para andar; **E** para usar o console/objeto mais próximo (tarefa, botão de emergência, duto, reportar corpo); **Q** para matar (impostor); **R** para sabotar; **V** para entrar/sair do duto; **Enter** para abrir o chat da reunião. No celular: arraste o dedo para andar e use os botões na tela. |
+
+## Verificações
+
+```bash
+cd play
+node tests/new_game.test.mjs    # API do socket, tarefas, sabotagem e reunião
+node tests/crewwin.test.mjs    # vitória dos tripulantes por tarefas
+node tests/fullgame2.test.mjs  # partida completa só com bots (até 150s)
+node tools/validate-map.mjs    # geometria: salas, consoles, dutos, portas
+```
 
 ## Configuração
 

@@ -1,92 +1,87 @@
-import { COLORS, COLOR_BY_ID, MAP, ROOM_BY_ID, TASKS } from '../shared/config.js';
+import { COLORS, MAPS } from '../shared/mapdata.js';
+import { GAME_CONSTANTS, DEFAULT_SETTINGS, MAP_SABOTAGES, SABOTAGE_INFO } from '../shared/rules.js';
+import { makeShip } from './ship.js';
 
-const TICK_MS = 50;
-const PLAYER_SPEED = 210; // unidades de mundo por segundo
-const KILL_COOLDOWN_MS = 20000;
-const KILL_RANGE = 55;
-const TASK_INTERACT_RANGE = 55;
-const EMERGENCY_COOLDOWN_MS = 20000;
-const MEETING_DISCUSSION_MS = 30000;
-const MEETING_VOTE_MS = 45000;
-const SABOTAGE_COOLDOWN_MS = 30000;
-const VENTS = [
-  { id: 'v1', x: 470, y: 200 },
-  { id: 'v2', x: 720, y: 250 },
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const uid = (n = 8) => Math.random().toString(36).slice(2, 2 + n);
+
+const BOT_NAMES = [
+  'Pipoca', 'Zeus', 'Kiwi', 'Tuco', 'Luna', 'Nina', 'Sombra', 'Bolinho',
+  'Turbo', 'Pixel', 'Foguinho', 'Mel', 'Zeca', 'Duda', 'Cacau', 'Brisa',
+  'Trovão', 'Nuggets', 'Fada', 'Tofu',
 ];
 
-const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
-const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-const rand = (min, max) => min + Math.random() * (max - min);
-const uid = () => Math.random().toString(36).slice(2, 9);
-
 export class Game {
-  constructor(roomCode, onUpdate) {
-    this.code = roomCode;
+  constructor(code, onUpdate = () => {}) {
+    this.code = code;
     this.onUpdate = onUpdate;
-    this.players = new Map(); // id -> player
+    this.players = new Map();
     this.hostId = null;
-    this.state = 'lobby'; // lobby | playing | meeting | ended
-    this.settings = {
-      players: 8,
-      impostors: 1,
-      crewTasks: 4,
-      meeting: true,
-      speed: 1,
-    };
-    this.map = MAP;
-    this.tasks = []; // tarefas globais (com posição)
-    this.bodies = []; // corpos no mapa
-    this.sabotage = null; // {type, endsAt, fixedSteps}
-    this.lightsOut = false;
-    this.votes = new Map();
-    this.meeting = null;
-    this.endedAt = null;
-    this.winner = null;
-    this.tickTimer = null;
-    this.lastTick = Date.now();
+    this.state = 'lobby'; // lobby | starting | tasks | meeting | ended
+    this.settings = { ...DEFAULT_SETTINGS };
+    this.ship = makeShip(this.settings.map);
     this.log = [];
-    this.emergencyUsed = false;
-    this.emergencyAt = 0;
-    this.sabotageAt = 0;
-    this.freePlay = false;
+    this.bodies = [];
+    this.tasks = []; // instâncias de tarefas do mapa
+    this.meeting = null;
+    this.sabotage = null;
+    this.winner = null;
+    this.gameOverReason = null;
+    this.emergencyUsed = 0;
+    this.emergencyCooldownUntil = 0;
+    this.sabotageReadyAt = 0;
+    this.voteTimer = null;
+    this.tickTimer = null;
+    this.lastTick = 0;
+    this.startedAt = 0;
+    this.taskBarSnapshot = { done: 0, total: 1 };
+    this.round = 0;
   }
 
-  // ---------- players ----------
-  addPlayer(socketId, name, colorId, isBot = false, botLevel = 'normal') {
+  /* ============================ jogadores ============================ */
+  addPlayer(id, name, colorIndex, isBot = false) {
     const usedColors = new Set([...this.players.values()].map((p) => p.color));
-    let color = colorId && !usedColors.has(colorId) ? colorId : COLORS.find((c) => !usedColors.has(c.id))?.id;
-    if (!color) color = COLORS[0].id;
+    let color = typeof colorIndex === 'number' && !usedColors.has(colorIndex) ? colorIndex : null;
+    if (color === null) {
+      for (let i = 0; i < COLORS.length; i++) {
+        if (!usedColors.has(i)) { color = i; break; }
+      }
+    }
+    if (color === null) color = 0;
 
-    const spawn = this.randomSpawn();
+    const spawn = this.ship.randomSpawn();
     const player = {
-      id: socketId,
-      name: (name || 'Tripulante').slice(0, 14),
+      id,
+      name: (name || 'Tripulante').slice(0, 12),
       color,
       x: spawn.x,
       y: spawn.y,
       facing: 1,
       moving: false,
       isBot,
-      botLevel,
       alive: true,
-      role: null, // 'crew' | 'impostor'
+      connected: true,
+      role: null,
+      roleType: null,
       tasks: [],
-      tasksDone: 0,
-      kills: 0,
-      killedAt: null,
-      killCooldownEnd: 0,
       inVent: false,
       ventId: null,
+      ventChain: 0,
+      killReadyAt: 0,
+      kills: 0,
+      reportedBy: null,
       votedFor: null,
       voted: false,
-      ready: false,
-      connected: true,
       ghostX: spawn.x,
       ghostY: spawn.y,
+      botState: { goal: null, cooldownUntil: 0, idleUntil: 0 },
+      lastMoveAt: 0,
     };
-    this.players.set(socketId, player);
-    if (!this.hostId) this.hostId = socketId;
-    this.pushUpdate();
+    this.players.set(id, player);
+    if (!this.hostId) this.hostId = id;
+    this.push();
     return player;
   }
 
@@ -95,168 +90,207 @@ export class Game {
     if (!p) return;
     this.players.delete(id);
     if (this.hostId === id) {
-      this.hostId = [...this.players.values()].find((x) => !x.isBot)?.id || this.players.keys().next().value || null;
+      this.hostId = [...this.players.values()].find((x) => !x.isBot)?.id || [...this.players.keys()][0] || null;
     }
-    if (this.state === 'playing' || this.state === 'meeting') this.checkWinConditions();
-    this.pushUpdate();
+    if (['tasks', 'meeting'].includes(this.state)) this.checkWin();
+    this.push();
   }
 
   get humanCount() {
     return [...this.players.values()].filter((p) => !p.isBot).length;
   }
 
-  roomAt(x, y) {
-    return this.map.rooms.find(
-      (r) => r.w > 0 && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h,
-    ) || null;
-  }
-
-  randomSpawn() {
-    const rooms = this.map.rooms.filter((r) => r.w > 0);
-    const room = rooms[Math.floor(Math.random() * rooms.length)];
-    return {
-      x: rand(room.x + 30, room.x + room.w - 30),
-      y: rand(room.y + 30, room.y + room.h - 30),
-    };
-  }
-
-  // ---------- lobby ----------
-  setSettings(partial) {
-    const s = this.settings;
-    if (typeof partial.players === 'number') s.players = clamp(Math.round(partial.players), 4, 15);
-    if (typeof partial.impostors === 'number') s.impostors = clamp(Math.round(partial.impostors), 1, 3);
-    if (typeof partial.crewTasks === 'number') s.crewTasks = clamp(Math.round(partial.crewTasks), 1, 9);
-    if (typeof partial.meeting === 'boolean') s.meeting = partial.meeting;
-    this.pushUpdate();
-  }
-
-  setReady(id, ready) {
-    const p = this.players.get(id);
-    if (!p || this.state !== 'lobby') return;
-    p.ready = !!ready;
-    this.pushUpdate();
-  }
-
-  fillWithBots() {
-    const target = this.settings.players;
-    const humans = [...this.players.values()].filter((p) => !p.isBot);
-    const bots = [...this.players.values()].filter((p) => p.isBot);
-    if (humans.length + bots.length >= target) return;
-
-    const names = ['Bolinho', 'Pixel', 'Sombra', 'Turbo', 'Zeca', 'Nina', 'Ghost', 'Kiwi', 'Tuco', 'Luna', 'Beta', 'Mimi', 'Foguete', 'Xerife'];
-    const levels = ['easy', 'normal', 'normal', 'hard'];
-    const need = target - humans.length - bots.length;
+  fillBots() {
+    const target = clamp(this.settings.maxPlayers, 4, 15);
+    const current = this.players.size;
+    const need = target - current;
     for (let i = 0; i < need; i++) {
-      const name = names[(bots.length + i) % names.length] + (i > 11 ? i : '');
-      this.addPlayer('bot_' + uid(), name, null, true, levels[Math.floor(Math.random() * levels.length)]);
+      const used = new Set([...this.players.values()].map((p) => p.name));
+      const name = BOT_NAMES.filter((n) => !used.has(n))[0] || BOT_NAMES[i % BOT_NAMES.length];
+      this.addPlayer('bot_' + uid(), name, null, true);
     }
-    this.pushUpdate();
+    this.push();
   }
 
-  // ---------- partida ----------
-  startGame() {
-    const list = [...this.players.values()];
-    if (list.length < 3) return { error: 'Precisa de pelo menos 3 jogadores (chame amigos ou use bots).' };
-    if (list.length < this.settings.players) this.fillWithBots();
-
-    this.state = 'playing';
-    this.bodies = [];
-    this.votes.clear();
-    this.meeting = null;
-    this.sabotage = null;
-    this.lightsOut = false;
-    this.winner = null;
-    this.endedAt = null;
-    this.emergencyUsed = false;
-    this.emergencyAt = Date.now() + 10000;
-    this.sabotageAt = Date.now() + 15000;
-
-    const players = [...this.players.values()];
-    const impostorCount = this.settings.impostors;
-    const shuffled = [...players].sort(() => Math.random() - 0.5);
-    const impostors = shuffled.slice(0, impostorCount);
-
-    this.generateTasks();
-
-    for (const p of players) {
-      p.alive = true;
-      p.role = impostors.some((imp) => imp.id === p.id) ? 'impostor' : 'crew';
-      p.tasks = [];
-      p.tasksDone = 0;
-      p.kills = 0;
-      p.killedAt = null;
-      p.votedFor = null;
-      p.voted = false;
-      p.inVent = false;
-      p.ventId = null;
-      p.ready = false;
-      const spawn = this.randomSpawn();
-      p.x = spawn.x;
-      p.y = spawn.y;
-      p.killCooldownEnd = Date.now() + 12000;
+  clearBots() {
+    for (const p of [...this.players.values()]) {
+      if (p.isBot) this.players.delete(p.id);
     }
+    this.push();
+  }
 
-    // distribui tarefas (shuffle para não serem sempre as mesmas)
-    const taskPool = [...this.tasks].sort(() => Math.random() - 0.5).map((t) => t.id);
-    for (const p of players) {
-      if (p.role === 'crew') {
-        p.tasks = taskPool.slice(0, clamp(this.settings.crewTasks, 1, taskPool.length));
+  /* ============================ lobby ============================ */
+  setSettings(patch) {
+    const allowed = Object.keys(DEFAULT_SETTINGS);
+    for (const [k, v] of Object.entries(patch || {})) {
+      if (!allowed.includes(k)) continue;
+      if (k === 'map') {
+        if (!MAPS[v]) continue;
+        this.settings.map = v;
+        this.ship = makeShip(v);
+        continue;
+      }
+      if (typeof DEFAULT_SETTINGS[k] === 'number' && typeof v === 'number') {
+        this.settings[k] = Math.round(v * 100) / 100;
       } else {
-        p.tasks = [];
+        this.settings[k] = v;
       }
     }
+    const s = this.settings;
+    s.maxPlayers = clamp(Math.round(s.maxPlayers), 4, 15);
+    s.numImpostors = clamp(Math.round(s.numImpostors), 1, Math.max(1, Math.floor(s.maxPlayers / 2) - 1));
+    s.killCooldown = clamp(s.killCooldown, 10, 60);
+    s.discussionTime = clamp(s.discussionTime, 0, 120);
+    s.votingTime = clamp(s.votingTime, 30, 300);
+    s.playerSpeed = clamp(s.playerSpeed, 0.5, 3);
+    s.numCommonTasks = clamp(Math.round(s.numCommonTasks), 0, 4);
+    s.numLongTasks = clamp(Math.round(s.numLongTasks), 0, 4);
+    s.numShortTasks = clamp(Math.round(s.numShortTasks), 0, 6);
+    s.emergencyMeetings = clamp(Math.round(s.emergencyMeetings), 0, 9);
+    this.push();
+  }
 
-    this.log = [];
-    this.log.push('A partida começou!');
+  /* ============================ partida ============================ */
+  startGame() {
+    if (this.state !== 'lobby') return { error: 'A partida já está em andamento.' };
+    if (this.players.size < 4) this.fillBots();
+    const players = [...this.players.values()];
+    if (players.length < 4) return { error: 'São necessários pelo menos 4 jogadores.' };
+
+    this.state = 'starting';
+    this.round++;
+    this.bodies = [];
+    this.meeting = null;
+    this.sabotage = null;
+    this.winner = null;
+    this.gameOverReason = null;
+    this.emergencyUsed = 0;
+    this.emergencyCooldownUntil = 0;
+    this.sabotageReadyAt = Date.now(); // sabotagens liberadas desde o começo
+    this.ship = makeShip(this.settings.map);
+    this.tasks = this.buildTasks();
+
+    // sorteia impostores
+    const shuffled = [...players].sort(() => Math.random() - 0.5);
+    const impostorCount = clamp(this.settings.numImpostors, 1, players.length - 2);
+    const impostorIds = new Set(shuffled.slice(0, impostorCount).map((p) => p.id));
+
+    for (const p of players) {
+      p.role = impostorIds.has(p.id) ? 'impostor' : 'crew';
+      p.roleType = impostorIds.has(p.id) ? 'Impostor' : 'Crewmate';
+      p.alive = true;
+      p.kills = 0;
+      p.inVent = false;
+      p.ventId = null;
+      p.votedFor = null;
+      p.voted = false;
+      p.killReadyAt = Date.now() + 10000;
+      p.reportedBy = null;
+      p.botState = { goal: null, cooldownUntil: 0, idleUntil: 0 };
+      const spawn = this.ship.randomSpawn();
+      p.x = spawn.x;
+      p.y = spawn.y;
+      p.facing = 1;
+      p.tasks = [];
+    }
+
+    // distribui tarefas (2 comuns iguais para todos, longas e curtas por jogador)
+    const crew = players.filter((p) => p.role === 'crew');
+    for (const task of this.tasks) task.assignedTo = [];
+    this.assignTasks(crew);
+
+    this.startedAt = Date.now();
+    this.log.length = 0;
+    this.log.push({ type: 'system', text: 'A partida começou!' });
     this.startTicking();
-    this.pushUpdate();
+    this.push();
     return { ok: true };
   }
 
-  generateTasks() {
-    const taskDefs = Object.entries(TASKS);
-    this.tasks = [];
-    let n = 0;
-    for (const room of this.map.rooms) {
-      if (room.w <= 0) continue;
-      const roomTasks = taskDefs.filter(([, t]) => t.room === room.id);
-      for (const [key, def] of roomTasks) {
-        this.tasks.push({
-          id: 'task_' + uid(),
-          key,
-          ...def,
-          x: rand(room.x + 35, room.x + room.w - 35),
-          y: rand(room.y + 35, room.y + room.h - 35),
-          progress: 0,
-          completedBy: [],
-          owner: null,
-        });
-        n++;
-      }
-    }
-    // adiciona tarefas extras se o mapa tiver poucas
-    while (n < 14) {
-      const room = this.map.rooms.filter((r) => r.w > 0)[n % 10];
-      this.tasks.push({
-        id: 'task_' + uid(),
-        key: 'generic',
-        name: 'Tarefa',
-        room: room.id,
-        type: 'progress',
-        x: rand(room.x + 35, room.x + room.w - 35),
-        y: rand(room.y + 35, room.y + room.h - 35),
-        progress: 0,
-        completedBy: [],
-        owner: null,
+  buildTasks() {
+    const map = MAPS[this.settings.map] || MAPS.skeld;
+    const list = [];
+    for (const t of map.tasks) {
+      list.push({
+        key: `${t.taskType}-${t.id}`,
+        taskType: t.taskType,
+        name: t.name,
+        game: t.game,
+        length: t.length, // Common | Long | Short
+        consoles: t.consoles,
+        progress: {}, // playerId -> estado
+        completedBy: new Set(),
+        assignedTo: [],
       });
-      n++;
     }
+    return list;
   }
 
+  assignTasks(crew) {
+    const byLength = (len) => this.tasks.filter((t) => t.length === len);
+    const common = byLength('Common');
+    const longs = byLength('Long');
+    const shorts = byLength('Short');
+    const s = this.settings;
+
+    // comuns: a mesma tarefa para todos os tripulantes
+    const commonPick = common.slice(0, clamp(s.numCommonTasks, 0, common.length));
+    for (const p of crew) p.tasks = commonPick.map((t) => t.key);
+
+    // longas/curtas: cada jogador recebe uma seleção embaralhada (como no jogo),
+    // evitando repetir o mesmo tipo de tarefa entre jogadores diferentes
+    const pickDistinct = (pool, count) => {
+      const groups = new Map();
+      for (const t of pool) {
+        if (!groups.has(t.taskType)) groups.set(t.taskType, []);
+        groups.get(t.taskType).push(t);
+      }
+      const types = [...groups.keys()].sort(() => Math.random() - 0.5);
+      return types.slice(0, count).map((type) => {
+        const options = groups.get(type);
+        return options[Math.floor(Math.random() * options.length)];
+      });
+    };
+
+    for (const p of crew) {
+      const used = new Set(p.tasks);
+      const longsForP = pickDistinct(longs, clamp(s.numLongTasks, 0, longs.length)).filter((t) => !used.has(t.key));
+      const shortsForP = pickDistinct(shorts.filter((t) => !used.has(t.key)), clamp(s.numShortTasks, 0, shorts.length));
+      p.tasks.push(...longsForP.map((t) => t.key));
+      p.tasks.push(...shortsForP.map((t) => t.key));
+      p.tasks = [...new Set(p.tasks)];
+    }
+
+    for (const t of this.tasks) {
+      t.assignedTo = crew.filter((p) => p.tasks.includes(t.key)).map((p) => p.id);
+    }
+    this.taskBarSnapshot = this.currentTaskProgress();
+  }
+
+  totalTasksForCrew() {
+    const crew = [...this.players.values()].filter((p) => p.role === 'crew');
+    return crew.reduce((acc, p) => acc + p.tasks.length, 0);
+  }
+
+  currentTaskProgress() {
+    const crew = [...this.players.values()].filter((p) => p.role === 'crew');
+    let total = 0;
+    let done = 0;
+    for (const p of crew) {
+      for (const key of p.tasks) {
+        total++;
+        const task = this.tasks.find((t) => t.key === key);
+        if (task?.completedBy.has(p.id)) done++;
+      }
+    }
+    return { done, total };
+  }
+
+  /* ============================ loop ============================ */
   startTicking() {
     if (this.tickTimer) return;
     this.lastTick = Date.now();
-    this.tickTimer = setInterval(() => this.tick(), TICK_MS);
+    this.tickTimer = setInterval(() => this.tick(), 1000 / GAME_CONSTANTS.TICK_HZ);
   }
 
   stopTicking() {
@@ -266,435 +300,486 @@ export class Game {
 
   tick() {
     const now = Date.now();
-    const dt = Math.min(0.2, (now - this.lastTick) / 1000);
+    const dt = Math.min(0.25, (now - this.lastTick) / 1000);
     this.lastTick = now;
 
-    if (this.state === 'playing') {
-      this.moveBots(dt, now);
-      this.botActions(now);
-      this.checkSabotage(now);
+    if (this.state === 'tasks' || this.state === 'starting') {
+      if (this.state === 'starting' && now - this.startedAt > 3000) this.state = 'tasks';
+      this.tickBots(dt, now);
+      this.tickSabotage(now);
     } else if (this.state === 'meeting') {
-      this.checkMeetingEnd(now);
+      this.tickMeeting(now);
     }
-    this.pushUpdate(true);
+    this.push();
   }
 
-  moveBots(dt, now) {
-    if (this.state !== 'playing') return;
-    for (const p of this.players.values()) {
-      if (!p.isBot || !p.alive) continue;
-      const target = this.botTarget(p);
-      if (!target) continue;
-      const dx = target.x - p.x;
-      const dy = target.y - p.y;
-      const d = Math.hypot(dx, dy);
-      if (d > 6) {
-        const speed = PLAYER_SPEED * dt * (p.botLevel === 'hard' ? 1.05 : p.botLevel === 'easy' ? 0.75 : 0.9);
-        p.x += (dx / d) * speed;
-        p.y += (dy / d) * speed;
-        p.facing = dx >= 0 ? 1 : -1;
-        p.moving = true;
-      } else {
-        p.moving = false;
-      }
-    }
-  }
-
-  botTarget(p) {
-    if (!p.botGoal || p.botGoalDone) {
-      // escolhe novo objetivo
-      if (p.role === 'impostor' && p.alive) {
-        const victims = [...this.players.values()].filter((o) => o.alive && o.role !== 'impostor');
-        if (victims.length && Math.random() < 0.65) {
-          const v = victims[Math.floor(Math.random() * victims.length)];
-          p.botGoal = { type: 'kill', x: v.x, y: v.y, target: v.id };
-        } else {
-          const room = this.map.rooms.filter((r) => r.w > 0)[Math.floor(Math.random() * 10)];
-          p.botGoal = { type: 'wander', x: rand(room.x + 30, room.x + room.w - 30), y: rand(room.y + 30, room.y + room.h - 30) };
-        }
-      } else if (this.sabotage) {
-        const roomId = { lights: 'electrical', reactor: 'reactor', comms: 'admin' }[this.sabotage.type];
-        const room = this.map.rooms.find((r) => r.id === roomId);
-        if (room) {
-          p.botGoal = { type: 'fix', x: room.x + room.w / 2, y: room.y + room.h / 2, roomId };
-          return p.botGoal;
-        }
-        const taskId = p.tasks.find((tid) => !this.taskCompletedBy(tid, p.id));
-        const task = taskId ? this.tasks.find((t) => t.id === taskId) : null;
-        if (task) p.botGoal = { type: 'task', x: task.x, y: task.y, taskId: task.id };
-      } else {
-        const taskId = p.tasks.find((tid) => !this.taskCompletedBy(tid, p.id));
-        const task = taskId ? this.tasks.find((t) => t.id === taskId) : null;
-        if (task) p.botGoal = { type: 'task', x: task.x, y: task.y, taskId: task.id };
-        else {
-          const room = this.map.rooms.filter((r) => r.w > 0)[Math.floor(Math.random() * 10)];
-          p.botGoal = { type: 'wander', x: rand(room.x + 30, room.x + room.w - 30), y: rand(room.y + 30, room.y + room.h - 30) };
-        }
-      }
-    }
-    return p.botGoal;
-  }
-
-  botActions(now) {
-    for (const p of this.players.values()) {
-      if (!p.isBot || !p.alive || this.state !== 'playing') continue;
-
-      // bots tripulantes reportam corpos que encontram
-      if (p.role === 'crew') {
-        const body = this.bodies.find((b) => Math.hypot(b.x - p.x, b.y - p.y) < 55);
-        if (body && Math.random() < 0.12) {
-          this.startMeeting(p.id, 'report');
-          return;
-        }
-      }
-
-      const goal = p.botGoal;
-      if (!goal) continue;
-      const d = Math.hypot(goal.x - p.x, goal.y - p.y);
-      if (d > 45) continue;
-
-      if (goal.type === 'task' && p.role === 'crew') {
-        const task = this.tasks.find((t) => t.id === goal.taskId);
-        if (task) {
-          task.progress = Math.min(100, task.progress + 8 + Math.random() * 10);
-          if (task.progress >= 100) {
-            this.completeTask(p.id, task.id);
-          }
-        }
-        p.botGoal = null;
-      } else if (goal.type === 'fix') {
-        this.fixSabotage(p.id, goal.roomId);
-        p.botGoal = null;
-      } else if (goal.type === 'kill' && p.role === 'impostor') {
-        if (!this.sabotage && now > this.sabotageAt && Math.random() < 0.02) {
-          this.triggerSabotage(p.id, ['lights', 'comms', 'reactor'][Math.floor(Math.random() * 3)]);
-        }
-        if (now < p.killCooldownEnd) {
-          p.botGoal = null;
-          continue;
-        }
-        const v = this.players.get(goal.target);
-        if (v && v.alive && dist(p, v) < KILL_RANGE + 30) {
-          this.killPlayer(p.id, v.id);
-        }
-        p.botGoal = null;
-      } else {
-        p.botGoal = null;
-      }
-    }
-  }
-
-  // ---------- movimento ----------
+  /* ============================ movimento ============================ */
   move(id, x, y) {
     const p = this.players.get(id);
-    if (!p) return;
-    if (this.state !== 'playing' && this.state !== 'ended') return;
-    if (p.inVent) return;
-    p.x = clamp(x, 5, this.map.width - 5);
-    p.y = clamp(y, 5, this.map.height - 5);
-    p.moving = true;
-    // corpo encontrado automaticamente
-    if (p.alive) {
-      const body = this.bodies.find((b) => dist(b, p) < 35 && b.foundBy?.includes(p.id) === false);
+    if (!p || !p.alive || this.state === 'meeting') return;
+    if (p.inVent) {
+      // no duto: só pode ir para o próximo duto da rede
+      const vent = this.ship.ventById(p.ventId);
+      if (vent && dist({ x, y }, vent) < 1.2) {
+        p.x = vent.x;
+        p.y = vent.y;
+      }
+      return;
+    }
+    const speed = GAME_CONSTANTS.BASE_SPEED * this.settings.playerSpeed;
+    const maxStep = speed * 0.35 + 0.4;
+    const dx = clamp(x - p.x, -maxStep, maxStep);
+    const dy = clamp(y - p.y, -maxStep, maxStep);
+    const next = this.ship.move(p.x, p.y, dx, dy);
+    if (Math.abs(next.x - p.x) > 0.0001) p.facing = next.x > p.x ? 1 : -1;
+    p.x = next.x;
+    p.y = next.y;
+    p.moving = Math.hypot(dx, dy) > 0.02;
+    p.lastMoveAt = Date.now();
+    p.botState.goal = null;
+  }
+
+  /* ============================ tarefas ============================ */
+  startTask(id, taskKey, consoleId) {
+    const p = this.players.get(id);
+    const task = this.tasks.find((t) => t.key === taskKey);
+    if (!p || !task || !p.alive) return { error: 'Tarefa inválida.' };
+    if (p.role === 'impostor') return { error: 'Impostores não fazem tarefas.' };
+    if (!p.tasks.includes(task.key)) return { error: 'Essa tarefa não é sua.' };
+    if (task.completedBy.has(p.id)) return { error: 'Tarefa já concluída.' };
+    if (this.sabotage?.type === 'comms') return { error: 'Comunicação caída: tarefas desativadas.' };
+    const console_ = task.consoles.find((c) => c.id === consoleId) || task.consoles[0];
+    if (!console_) return { error: 'Console inválido.' };
+    if (dist(p, console_) > GAME_CONSTANTS.TASK_USE_DISTANCE + 0.6) {
+      return { error: 'Você precisa estar no console da tarefa.' };
+    }
+    const prog = this.taskProgress(p.id, task.key);
+    if (prog.finished) return { error: 'Tarefa já concluída.' };
+    return {
+      ok: true,
+      task: {
+        key: task.key,
+        name: task.name,
+        game: task.game,
+        length: task.length,
+        step: prog.step,
+        totalSteps: this.taskSteps(task),
+        data: prog.data,
+      },
+    };
+  }
+
+  taskSteps(task) {
+    switch (task.game) {
+      case 'wires': return task.consoles.length;
+      case 'fuel': return 3;
+      case 'upload': return 2;
+      case 'divert': return 2;
+      case 'multistep': return 3;
+      default: return 1;
     }
   }
 
-  completeTask(playerId, taskId) {
-    const p = this.players.get(playerId);
-    const task = this.tasks.find((t) => t.id === taskId);
-    if (!p || !task) return;
-    if (!task.completedBy.includes(playerId)) {
-      task.completedBy.push(playerId);
-      task.progress = 100;
-      p.tasksDone++;
-      this.log.push(`${p.name} completou uma tarefa.`);
-      this.checkWinConditions();
-      this.pushUpdate();
+  taskProgress(playerId, taskKey) {
+    const task = this.tasks.find((t) => t.key === taskKey);
+    if (!task) return { step: 0, finished: true, data: null };
+    const prog = task.progress[playerId] || { step: 0, data: null };
+    return { ...prog, finished: task.completedBy.has(playerId) };
+  }
+
+  /** Avança um passo da tarefa. O cliente faz o minigame e confirma o passo. */
+  advanceTask(id, taskKey, payload = {}) {
+    const p = this.players.get(id);
+    const task = this.tasks.find((t) => t.key === taskKey);
+    if (!p || !task || !p.alive) return { error: 'Tarefa inválida.' };
+    if (!p.tasks.includes(task.key)) return { error: 'Essa tarefa não é sua.' };
+    if (task.completedBy.has(p.id)) return { error: 'Tarefa já concluída.' };
+    if (this.sabotage?.type === 'comms') return { error: 'Comunicação caída.' };
+    const console_ = task.consoles.find((c) => c.id === payload.consoleId) || task.consoles[0];
+    if (dist(p, console_) > GAME_CONSTANTS.TASK_USE_DISTANCE + 1.2) return { error: 'Longe do console.' };
+
+    const prog = task.progress[p.id] || { step: 0, data: null };
+    const total = this.taskSteps(task);
+    prog.step = Math.min(total, prog.step + 1);
+    prog.data = payload.data ?? prog.data;
+    task.progress[p.id] = prog;
+
+    let finished = false;
+    if (prog.step >= total) {
+      finished = true;
+      task.completedBy.add(p.id);
+      if (this.settings.taskBarMode === 0) this.taskBarSnapshot = this.currentTaskProgress();
+      this.log.push({ type: 'task', text: `${p.name} completou ${task.name}.` });
+      this.checkWin();
     }
+    this.push();
+    return { ok: true, finished, step: prog.step, totalSteps: total };
   }
 
-  taskCompletedBy(taskId, playerId) {
-    const t = this.tasks.find((x) => x.id === taskId);
-    return !!t && t.completedBy.includes(playerId);
-  }
-
-  // ---------- kill / vents ----------
-  killPlayer(killerId, targetId) {
-    if (this.state !== 'playing') return { error: 'Partida não está em andamento.' };
+  /* ============================ kill / report / dutos ============================ */
+  kill(killerId, targetId) {
     const killer = this.players.get(killerId);
     const target = this.players.get(targetId);
-    if (!killer || !target) return { error: 'Jogador não encontrado.' };
-    if (killer.role !== 'impostor') return { error: 'Apenas impostores podem matar.' };
-    if (!killer.alive) return { error: 'Você está morto.' };
-    if (!target.alive) return { error: 'Alvo já está morto.' };
-    if (target.role === 'impostor') return { error: 'Esse é seu parceiro de sabotagem.' };
-    if (Date.now() < killer.killCooldownEnd) return { error: 'Cooldown de kill ativo.' };
-    if (dist(killer, target) > KILL_RANGE + 12) return { error: 'Alvo longe demais.' };
+    if (this.state !== 'tasks') return { error: 'Não é possível matar agora.' };
+    if (!killer || !killer.alive || killer.role !== 'impostor') return { error: 'Você não é um impostor.' };
+    if (!target || !target.alive) return { error: 'Alvo inválido.' };
+    if (target.role === 'impostor') return { error: 'Não pode matar outro impostor.' };
+    if (Date.now() < killer.killReadyAt) return { error: 'Aguarde o cooldown do kill.' };
+    const range = GAME_CONSTANTS.KILL_DISTANCES[this.settings.killDistance] || 1.8;
+    if (dist(killer, target) > range) return { error: 'Alvo fora de alcance.' };
 
     target.alive = false;
+    target.inVent = false;
     target.killedAt = Date.now();
-    target.moving = false;
-    target.killCooldownEnd = 0;
+    target.killedBy = killerId;
     killer.kills++;
-    killer.killCooldownEnd = Date.now() + KILL_COOLDOWN_MS;
-    this.bodies.push({ id: 'body_' + uid(), playerId: target.id, color: target.color, name: target.name, x: target.x, y: target.y, at: Date.now() });
-    this.log.push(`${target.name} foi eliminado.`);
-    this.checkWinConditions();
-    this.pushUpdate();
+    killer.killReadyAt = Date.now() + this.settings.killCooldown * 1000;
+    // bots: ~55% do cooldown humano para a partida não arrastar
+    if (killer.isBot) killer.killReadyAt = Date.now() + Math.max(9000, this.settings.killCooldown * 550);
+    this.bodies.push({
+      id: 'body_' + uid(5),
+      playerId: target.id,
+      color: target.color,
+      name: target.name,
+      x: target.x,
+      y: target.y,
+      room: this.ship.roomAt(target.x, target.y),
+      at: Date.now(),
+    });
+    this.checkWin();
+    this.push();
     return { ok: true };
   }
 
-  reportBody(playerId, bodyId) {
-    if (this.state !== 'playing') return { error: 'Não é possível reportar agora.' };
-    const p = this.players.get(playerId);
+  report(bodyId, reporterId) {
+    const p = this.players.get(reporterId);
+    if (this.state !== 'tasks' || !p || !p.alive) return { error: 'Não é possível reportar agora.' };
     const body = this.bodies.find((b) => b.id === bodyId);
-    if (!p || !p.alive) return { error: 'Você não pode reportar.' };
-    if (!body || !body.playerId) return { error: 'Corpo inválido.' };
-    if (dist(p, body) > 110) return { error: 'Longe demais do corpo.' };
-    this.startMeeting(playerId, 'report');
+    if (!body) return { error: 'Corpo não encontrado.' };
+    if (dist(p, body) > GAME_CONSTANTS.REPORT_DISTANCE + 0.8) return { error: 'Longe do corpo.' };
+    this.startMeeting(reporterId, 'report', body);
     return { ok: true };
   }
 
-  useVent(playerId, ventId) {
+  enterVent(playerId, ventId) {
     const p = this.players.get(playerId);
-    if (!p || p.role !== 'impostor' || !p.alive || this.state !== 'playing') return;
-    const vent = VENTS.find((v) => v.id === ventId);
-    if (!vent) return;
-    p.inVent = !p.inVent;
-    p.ventId = p.inVent ? ventId : null;
-    if (p.inVent) {
-      p.x = vent.x;
-      p.y = vent.y;
-    }
-    this.pushUpdate();
+    if (this.state !== 'tasks' || !p || !p.alive || p.role !== 'impostor') return { error: 'Só impostores usam dutos.' };
+    const vent = this.ship.ventById(ventId);
+    if (!vent) return { error: 'Duto inválido.' };
+    if (dist(p, vent) > 1.6) return { error: 'Longe do duto.' };
+    p.inVent = true;
+    p.ventId = vent.id;
+    p.ventChain = 0;
+    p.x = vent.x;
+    p.y = vent.y;
+    this.push();
+    return { ok: true };
   }
 
-  // ---------- sabotagem ----------
-  triggerSabotage(playerId, type) {
+  moveVent(playerId, direction = 1) {
     const p = this.players.get(playerId);
-    if (!p || p.role !== 'impostor' || !p.alive || this.state !== 'playing') return { error: 'Apenas impostores vivos podem sabotar.' };
-    if (Date.now() < this.sabotageAt) return { error: 'Sabotagem em cooldown.' };
+    if (!p?.inVent) return { error: 'Você não está em um duto.' };
+    const next = this.ship.ventNeighbor(p.ventId, direction);
+    if (!next) return { error: 'Não há outro duto conectado.' };
+    p.ventId = next.id;
+    p.x = next.x;
+    p.y = next.y;
+    p.ventChain++;
+    this.push();
+    return { ok: true };
+  }
+
+  exitVent(playerId) {
+    const p = this.players.get(playerId);
+    if (!p?.inVent) return { error: 'Você não está em um duto.' };
+    const vent = this.ship.ventById(p.ventId);
+    p.inVent = false;
+    p.ventId = null;
+    if (vent) {
+      // sai ao lado do duto
+      const spot = this.ship.move(vent.x, vent.y, 0.9, 0.9);
+      p.x = spot.x;
+      p.y = spot.y;
+    }
+    this.push();
+    return { ok: true };
+  }
+
+  /* ============================ sabotagem ============================ */
+  startSabotage(playerId, type) {
+    const p = this.players.get(playerId);
+    if (this.state !== 'tasks') return { error: 'Não é possível sabotar agora.' };
+    if (!p || !p.alive || p.role !== 'impostor') return { error: 'Só impostores sabotam.' };
     if (this.sabotage) return { error: 'Já existe uma sabotagem ativa.' };
-
-    const durations = { lights: 25000, reactor: 45000, comms: 35000 };
-    if (!durations[type]) return { error: 'Sabotagem inválida.' };
-
-    this.sabotage = { type, endsAt: Date.now() + durations[type], by: playerId, fixed: 0 };
-    this.lightsOut = type === 'lights';
-    this.sabotageAt = Date.now() + durations[type] + 15000;
-    this.log.push(`Sabotagem: ${type}!`);
-    this.pushUpdate();
+    if (Date.now() < this.sabotageReadyAt) return { error: 'Sabotagem em cooldown.' };
+    const allowed = MAP_SABOTAGES[this.settings.map] || [];
+    if (!allowed.includes(type)) return { error: 'Sabotagem indisponível neste mapa.' };
+    const info = SABOTAGE_INFO[type];
+    const endsAt = Date.now() + info.time * 1000;
+    this.sabotage = {
+      type,
+      endsAt,
+      by: playerId,
+      fixedBy: [],
+      roomId: info.room,
+      requiredFixes: type === 'reactor' ? 2 : 1,
+    };
+    this.log.push({ type: 'sabotage', text: `Sabotagem: ${info.name}!` });
+    this.push();
     return { ok: true };
   }
 
-  fixSabotage(playerId, roomId) {
+  fixSabotage(playerId, station) {
     const p = this.players.get(playerId);
-    if (!p || !p.alive || !this.sabotage) return;
-    const fixMap = { lights: 'electrical', reactor: 'reactor', comms: 'admin' };
-    if (fixMap[this.sabotage.type] !== roomId) return;
-    if (this.roomAt(p.x, p.y)?.id !== roomId) return;
-    // reator exige 2 tripulantes (ou 2 toques) para estabilizar
-    if (this.sabotage.type === 'reactor') {
-      this.sabotage.fixed = (this.sabotage.fixed || 0) + 1;
-      if (this.sabotage.fixed < 2) {
-        this.log.push(`${p.name} segurou uma alavanca do reator.`);
-        this.pushUpdate();
-        return;
-      }
+    if (!this.sabotage || !p || !p.alive || p.role !== 'crew') return { error: 'Não é possível consertar.' };
+    const room = this.ship.roomAt(p.x, p.y);
+    if (room !== this.sabotage.roomId && station !== this.sabotage.roomId) {
+      return { error: `Vá para ${this.sabotage.roomId} para consertar.` };
     }
-    this.clearSabotage();
+    if (!this.sabotage.fixedBy.includes(playerId)) this.sabotage.fixedBy.push(playerId);
+    if (this.sabotage.fixedBy.length >= this.sabotage.requiredFixes) {
+      this.log.push({ type: 'system', text: 'Sabotagem resolvida.' });
+      this.sabotage = null;
+      this.sabotageReadyAt = Date.now() + GAME_CONSTANTS.SABOTAGE_COOLDOWN * 1000;
+      this.push();
+      return { ok: true, fixed: true };
+    }
+    this.push();
+    return { ok: true, fixed: false, progress: `${this.sabotage.fixedBy.length}/${this.sabotage.requiredFixes}` };
   }
 
-  clearSabotage() {
-    this.sabotage = null;
-    this.lightsOut = false;
-    this.sabotageAt = Date.now() + SABOTAGE_COOLDOWN_MS;
-    this.log.push('Sabotagem resolvida.');
-    this.pushUpdate();
-  }
-
-  checkSabotage(now) {
+  tickSabotage(now) {
     if (!this.sabotage) return;
-    if (now >= this.sabotage.endsAt) {
-      // sabotagem não resolvida: impostores vencem (exceto luzes)
-      if (this.sabotage.type === 'reactor' || this.sabotage.type === 'comms') {
-        this.endGame('impostor', 'A sabotagem não foi consertada a tempo.');
-      } else {
-        this.clearSabotage();
-      }
+    if (now < this.sabotage.endsAt) return;
+    const info = SABOTAGE_INFO[this.sabotage.type];
+    if (info?.fatal) {
+      this.endGame('impostor', `A sabotagem de ${info.name} não foi consertada.`);
+    } else {
+      // luzes/comms simplesmente se recuperam
+      this.log.push({ type: 'system', text: `A sabotagem de ${info?.name || ''} se resolveu sozinha.` });
+      this.sabotage = null;
+      this.sabotageReadyAt = now + GAME_CONSTANTS.SABOTAGE_COOLDOWN * 1000;
     }
+    this.push();
   }
 
-  // ---------- reunião ----------
+  closeDoors(playerId, roomId) {
+    const p = this.players.get(playerId);
+    if (this.state !== 'tasks' || !p?.alive || p.role !== 'impostor') return { error: 'Só impostores fecham portas.' };
+    const count = this.ship.closeDoors(roomId, GAME_CONSTANTS.DOOR_TIME * 1000);
+    if (!count) return { error: 'Essa sala não tem portas.' };
+    this.push();
+    return { ok: true, doors: count };
+  }
+
+  /* ============================ reunião / votação ============================ */
   callEmergency(playerId) {
     const p = this.players.get(playerId);
-    if (!p || !p.alive || this.state !== 'playing') return { error: 'Não é possível agora.' };
-    if (!this.settings.meeting) return { error: 'Botão de emergência desativado nesta partida.' };
-    if (this.roomAt(p.x, p.y)?.id !== 'cafeteria') return { error: 'O botão fica na Cafeteria.' };
-    if (this.emergencyUsed) return { error: 'Botão de emergência já usado.' };
-    if (Date.now() < this.emergencyAt) return { error: 'Botão em cooldown.' };
-    this.emergencyUsed = true;
-    this.emergencyAt = Date.now() + EMERGENCY_COOLDOWN_MS;
-    this.startMeeting(playerId, 'emergency');
+    if (this.state !== 'tasks' || !p?.alive) return { error: 'Não é possível agora.' };
+    if (this.settings.emergencyMeetings === 0) return { error: 'Reuniões de emergência desativadas.' };
+    if (this.emergencyUsed >= this.settings.emergencyMeetings) return { error: 'Sem reuniões de emergência restantes.' };
+    if (Date.now() < this.emergencyCooldownUntil) return { error: 'Botão em cooldown.' };
+    if (!this.ship.nearEmergency(p.x, p.y)) return { error: `O botão fica na Cafeteria.` };
+    this.emergencyUsed++;
+    this.startMeeting(playerId, 'emergency', null);
+    return { ok: true };
   }
 
-  startMeeting(callerId, reason) {
+  startMeeting(callerId, reason, body = null) {
     if (this.state === 'meeting') return;
     const caller = this.players.get(callerId);
     this.state = 'meeting';
+    this.emergencyCooldownUntil = Date.now() + this.settings.emergencyCooldown * 1000;
+    this.bodies = this.bodies.filter((b) => b.id !== body?.id);
+    if (body) this.bodies = [];
     this.sabotage = null;
-    this.lightsOut = false;
-    this.bodies = [];
+    this.ship = makeShip(this.settings.map); // portas reabrem
+
+    const now = Date.now();
     this.meeting = {
       callerId,
-      callerName: caller?.name || 'Alguém',
+      callerName: caller?.name || '?',
       reason,
-      endsAt: Date.now() + MEETING_DISCUSSION_MS,
-      votingAt: Date.now() + MEETING_DISCUSSION_MS,
-      voteEndsAt: Date.now() + MEETING_DISCUSSION_MS + MEETING_VOTE_MS,
-      phase: 'discussion',
+      bodyRoom: body?.room || null,
+      startedAt: now,
+      discussionUntil: now + this.settings.discussionTime * 1000,
+      votingUntil: now + (this.settings.discussionTime + this.settings.votingTime) * 1000,
+      phase: this.settings.discussionTime > 0 ? 'discussion' : 'voting',
+      ejectedId: null,
+      tie: false,
+      skipped: false,
     };
-    this.votes.clear();
-    for (const pl of this.players.values()) {
-      pl.votedFor = null;
-      pl.voted = false;
+    for (const p of this.players.values()) {
+      p.votedFor = null;
+      p.voted = false;
+      p.inVent = false;
+      p.ventId = null;
+      if (p.alive) {
+        const spawn = this.ship.randomSpawn(this.ship.data.spawn.meeting);
+        p.x = spawn.x;
+        p.y = spawn.y;
+        p.moving = false;
+      }
     }
-    // bots votam depois de um tempo
+    // barra de tarefas: modo "reuniões"
+    this.taskBarSnapshot = this.currentTaskProgress();
+    this.log.push({
+      type: 'meeting',
+      text: reason === 'report'
+        ? `${caller?.name} reportou o corpo de ${this.players.get(body?.playerId)?.name || '?'}.`
+        : `${caller?.name} chamou uma reunião de emergência.`,
+    });
     this.scheduleBotVotes();
-    this.log.push(`${this.meeting.callerName} ${reason === 'report' ? 'reportou um corpo' : 'chamou uma reunião de emergência'}.`);
-    this.pushUpdate();
+    this.push();
   }
 
   scheduleBotVotes() {
-    setTimeout(() => {
-      if (this.state !== 'meeting') return;
-      for (const p of this.players.values()) {
+    if (this.voteTimer) clearTimeout(this.voteTimer);
+    this.voteTimer = setTimeout(() => {
+      if (this.state !== 'meeting' || !this.meeting) return;
+      for (const p of [...this.players.values()]) {
         if (!p.isBot || !p.alive) continue;
+        const delay = rand(1200, 6000);
         setTimeout(() => {
           if (this.state !== 'meeting' || p.voted) return;
-          this.castVote(p.id, this.botVoteChoice(p));
-        }, rand(800, 5000));
+          this.vote(p.id, this.botVoteChoice(p));
+        }, delay);
       }
-    }, MEETING_DISCUSSION_MS + 1200);
+    }, Math.max(0, this.settings.discussionTime * 1000 + 800));
   }
 
   botVoteChoice(bot) {
     const alive = [...this.players.values()].filter((p) => p.alive);
     if (bot.role === 'impostor') {
-      const innocents = alive.filter((p) => p.role !== 'impostor' && p.id !== bot.id);
-      if (innocents.length) return innocents[Math.floor(Math.random() * innocents.length)].id;
-    } else {
-      const suspects = alive.filter((p) => p.id !== bot.id);
-      if (suspects.length && Math.random() < 0.6) return suspects[Math.floor(Math.random() * suspects.length)].id;
+      // vota em quem não é impostor, evitando companheiros
+      const innocents = alive.filter((p) => p.role !== 'impostor');
+      if (innocents.length > 0 && Math.random() < 0.85) {
+        return innocents[Math.floor(Math.random() * innocents.length)].id;
+      }
+      return 'skip';
+    }
+    // tripulante: desconfia de quem estava perto do corpo ou é aleatório
+    const suspects = alive.filter((p) => p.id !== bot.id);
+    if (suspects.length && Math.random() < 0.7) {
+      return suspects[Math.floor(Math.random() * suspects.length)].id;
     }
     return 'skip';
   }
 
-  castVote(playerId, targetId) {
-    if (this.state !== 'meeting') return { error: 'Sem votação ativa.' };
+  vote(playerId, targetId) {
     const p = this.players.get(playerId);
-    if (!p || !p.alive || p.voted) return { error: 'Voto não permitido.' };
+    if (this.state !== 'meeting' || !this.meeting) return { error: 'Sem votação ativa.' };
+    if (!p || !p.alive) return { error: 'Você não pode votar.' };
+    if (p.voted) return { error: 'Você já votou.' };
+    if (Date.now() > this.meeting.votingUntil) return { error: 'Votação encerrada.' };
     p.voted = true;
     p.votedFor = targetId;
-    this.votes.set(playerId, targetId);
-    // se todos votaram, encerra antes
     const alive = [...this.players.values()].filter((x) => x.alive);
-    if (this.votes.size >= alive.length) {
-      setTimeout(() => this.finishMeeting(), 2500);
-    }
-    this.pushUpdate();
+    if (alive.every((x) => x.voted)) setTimeout(() => this.finishMeeting(), 2000);
+    this.push();
     return { ok: true };
   }
 
-  tallyVotes() {
-    const counts = {};
-    for (const [voter, target] of this.votes.entries()) {
-      if (!this.players.get(voter)?.alive) continue;
-      counts[target] = (counts[target] || 0) + 1;
-    }
-    return counts;
+  skipVote(playerId) {
+    return this.vote(playerId, 'skip');
   }
 
-  checkMeetingEnd(now) {
-    if (!this.meeting) return;
-    if (this.meeting.phase === 'discussion' && now >= this.meeting.votingAt) {
-      this.meeting.phase = 'voting';
-      this.log.push('Votação aberta.');
-      this.pushUpdate();
+  tickMeeting(now) {
+    const m = this.meeting;
+    if (!m) return;
+    if (m.phase === 'discussion' && now >= m.discussionUntil) {
+      m.phase = 'voting';
+      this.log.push({ type: 'system', text: 'Votação aberta.' });
+      this.push();
     }
-    if (now >= this.meeting.voteEndsAt) this.finishMeeting();
+    if (now >= m.votingUntil) this.finishMeeting();
   }
 
   finishMeeting() {
-    if (this.state !== 'meeting' || this.finishedMeeting) return;
-    this.finishedMeeting = true;
+    if (this.state !== 'meeting' || !this.meeting || this.meeting.done) return;
+    const m = this.meeting;
+    m.done = true;
+
     const tally = new Map();
-    for (const [voter, target] of this.votes.entries()) {
-      if (!this.players.get(voter)?.alive) continue;
-      tally.set(target, (tally.get(target) || 0) + 1);
-    }
-    let ejected = null;
-    let top = 0;
-    let tie = false;
-    for (const [target, count] of tally.entries()) {
-      if (count > top) {
-        top = count;
-        ejected = target;
-        tie = false;
-      } else if (count === top) tie = true;
-    }
-    if (ejected === 'skip' || tie) ejected = null;
-    const result = { ejectedId: ejected, tie, votes: [...tally.entries()] };
-    this.lastMeetingResult = result;
-
-    if (ejected) {
-      const p = this.players.get(ejected);
-      if (p) {
-        p.alive = false;
-        p.killedAt = Date.now();
-        p.ejected = true;
-        this.log.push(`${p.name} foi ejetado. ${p.role === 'impostor' ? 'ERA O IMPOSTOR!' : 'Não era o impostor.'}`);
-      }
-    } else {
-      this.log.push('Ninguém foi ejetado.');
-    }
-
-    this.state = 'playing';
-    this.meeting = null;
-    this.votes.clear();
-    this.finishedMeeting = false;
-    this.emergencyAt = Date.now() + 10000;
-    // recoloca vivos em spawns
     for (const p of this.players.values()) {
-      if (p.alive) {
-        const spawn = this.randomSpawn();
-        p.x = spawn.x;
-        p.y = spawn.y;
+      if (!p.alive || !p.voted) continue;
+      const t = p.votedFor;
+      tally.set(t, (tally.get(t) || 0) + 1);
+    }
+    const alive = [...this.players.values()].filter((p) => p.alive);
+    let topId = null;
+    let topCount = 0;
+    let tie = false;
+    for (const [id, count] of tally.entries()) {
+      if (id === 'skip') continue;
+      if (count > topCount) {
+        topCount = count;
+        topId = id;
+        tie = false;
+      } else if (count === topCount) {
+        tie = true;
       }
     }
-    this.checkWinConditions();
-    this.pushUpdate();
+    const skipCount = tally.get('skip') || 0;
+    if (skipCount >= topCount) { topId = null; tie = false; }
+
+    m.ejectedId = tie ? null : topId;
+    m.tie = tie;
+    m.skipped = !topId && !tie;
+    m.voteTally = Object.fromEntries(tally);
+
+    if (m.ejectedId) {
+      const ejected = this.players.get(m.ejectedId);
+      if (ejected) {
+        ejected.alive = false;
+        ejected.ejected = true;
+        ejected.killedAt = Date.now();
+        const reveal = this.settings.confirmImpostor;
+        this.log.push({
+          type: 'eject',
+          text: `${ejected.name} foi ejetado.${reveal ? (ejected.role === 'impostor' ? ' ERA O IMPOSTOR!' : ' Não era o impostor.') : ''}`,
+          wasImpostor: reveal ? ejected.role === 'impostor' : null,
+        });
+      }
+    } else if (m.tie) {
+      this.log.push({ type: 'system', text: 'Empate: ninguém foi ejetado.' });
+    } else {
+      this.log.push({ type: 'system', text: 'Ninguém foi ejetado.' });
+    }
+
+    this.meetingEndsAt = Date.now() + 5000;
+    setTimeout(() => {
+      if (this.state !== 'meeting') return;
+      this.state = 'tasks';
+      this.meeting = null;
+      for (const p of this.players.values()) {
+        if (p.alive) {
+          const spawn = this.ship.randomSpawn();
+          p.x = spawn.x;
+          p.y = spawn.y;
+        }
+        p.voted = false;
+        p.votedFor = null;
+      }
+      this.taskBarSnapshot = this.currentTaskProgress();
+      this.checkWin();
+      this.push();
+    }, 5000);
+    this.push();
   }
 
-  // ---------- condições de vitória ----------
-  checkWinConditions() {
+  /* ============================ fim de jogo ============================ */
+  checkWin() {
     if (this.state === 'ended') return;
     const alive = [...this.players.values()].filter((p) => p.alive);
-    const aliveImpostors = alive.filter((p) => p.role === 'impostor');
-    const aliveCrew = alive.filter((p) => p.role === 'crew');
-    if (aliveImpostors.length === 0) {
-      this.endGame('crew', 'Todos os impostores foram eliminados.');
-      return;
-    }
-    if (aliveImpostors.length >= aliveCrew.length) {
-      this.endGame('impostor', 'Os impostores igualaram o número de tripulantes.');
-      return;
-    }
-    const crewPlayers = [...this.players.values()].filter((p) => p.role === 'crew');
-    const totalTasks = crewPlayers.length * this.settings.crewTasks;
-    const doneTasks = crewPlayers.reduce((acc, p) => acc + p.tasksDone, 0);
-    if (totalTasks > 0 && doneTasks >= totalTasks) {
-      this.endGame('crew', 'Todos os tripulantes completaram as tarefas.');
+    const imps = alive.filter((p) => p.role === 'impostor');
+    const crew = alive.filter((p) => p.role === 'crew');
+    if (imps.length === 0) return this.endGame('crew', 'Todos os impostores foram eliminados.');
+    if (imps.length >= crew.length) return this.endGame('impostor', 'Os impostores são maioria.');
+
+    const progress = this.currentTaskProgress();
+    if (progress.total > 0 && progress.done >= progress.total) {
+      return this.endGame('crew', 'Todas as tarefas foram concluídas.');
     }
   }
 
@@ -702,102 +787,374 @@ export class Game {
     if (this.state === 'ended') return;
     this.state = 'ended';
     this.winner = winner;
-    this.endedAt = Date.now();
+    this.gameOverReason = reason;
+    this.sabotage = null;
     this.stopTicking();
-    this.log.push(winner === 'crew' ? 'TRIPULANTES VENCERAM!' : 'IMPOSTORES VENCERAM!');
-    this.pushUpdate();
+    this.log.push({
+      type: 'gameover',
+      text: winner === 'crew' ? 'VITÓRIA DOS TRIPULANTES!' : 'VITÓRIA DOS IMPOSTORES!',
+      reason,
+    });
+    this.push();
     setTimeout(() => {
-      if (this.state === 'ended' && this.players.size > 0) {
-        this.returnToLobby();
-      }
-    }, 12000);
+      if (this.state === 'ended') this.backToLobby();
+    }, 15000);
   }
 
-  returnToLobby() {
+  backToLobby() {
     this.state = 'lobby';
-    this.bodies = [];
-    this.sabotage = null;
-    this.lightsOut = false;
-    this.meeting = null;
     this.winner = null;
+    this.meeting = null;
+    this.sabotage = null;
+    this.bodies = [];
     this.stopTicking();
+    this.ship = makeShip(this.settings.map);
     for (const p of this.players.values()) {
       p.alive = true;
       p.role = null;
+      p.roleType = null;
       p.tasks = [];
-      p.tasksDone = 0;
-      p.kills = 0;
-      p.ready = p.isBot ? true : false;
       p.inVent = false;
+      p.kills = 0;
+      const spawn = this.ship.randomSpawn();
+      p.x = spawn.x;
+      p.y = spawn.y;
     }
-    this.pushUpdate();
+    this.push();
   }
 
-  // ---------- serialização ----------
+  /* ============================ bots ============================ */
+  tickBots(dt, now) {
+    for (const p of this.players.values()) {
+      if (!p.isBot || !p.alive) continue;
+      const bs = p.botState;
+      if (p.inVent) { this.exitVent(p.id); continue; }
+
+      if (!bs.goal) {
+        bs.goal = this.pickBotGoal(p, now);
+        bs.taskUntil = 0;
+        if (!bs.goal) continue;
+      }
+      const goal = bs.goal;
+      const d = dist(p, goal);
+      const speed = GAME_CONSTANTS.BASE_SPEED * this.settings.playerSpeed * 1.05;
+
+      // marca quando o bot chegou ao console para esperar o tempo da tarefa
+      if (goal.type === 'task' && !bs.taskUntil && d < 0.75) bs.taskUntil = now + rand(1500, 4000);
+
+      const arriveDist = goal.type === 'kill' ? 0.35 : 0.55;
+      if (d > arriveDist) {
+        const step = speed * dt;
+        // waypoint: se o caminho estiver livre, vai reto; senão segue a rota em grade
+        if (!bs.path || bs.pathGoal !== `${goal.x.toFixed(2)},${goal.y.toFixed(2)}` || bs.pathIndex >= (bs.path?.length || 0)) {
+          bs.path = this.ship.findPath(p, goal);
+          bs.pathIndex = 0;
+          bs.pathGoal = `${goal.x.toFixed(2)},${goal.y.toFixed(2)}`;
+        }
+        const waypoint = bs.path?.[Math.min(bs.pathIndex, (bs.path?.length || 1) - 1)] || goal;
+        const wd = Math.hypot(waypoint.x - p.x, waypoint.y - p.y);
+        if (wd < 0.35 && bs.pathIndex < (bs.path?.length || 0) - 1) bs.pathIndex++;
+
+        const tw = bs.path?.[Math.min(bs.pathIndex, (bs.path?.length || 1) - 1)] || goal;
+        const td = Math.hypot(tw.x - p.x, tw.y - p.y) || 1;
+        const dx = ((tw.x - p.x) / td) * step;
+        const dy = ((tw.y - p.y) / td) * step;
+        const next = this.ship.move(p.x, p.y, dx, dy);
+        if (Math.abs(next.x - p.x) < 1e-4 && Math.abs(next.y - p.y) < 1e-4) {
+          // desencalhe: tenta os lados
+          const angles = [Math.PI / 3, -Math.PI / 3, Math.PI / 2, -Math.PI / 2];
+          const a0 = Math.atan2(dy, dx);
+          let moved = false;
+          for (const off of angles) {
+            const alt = this.ship.move(p.x, p.y, Math.cos(a0 + off) * step, Math.sin(a0 + off) * step);
+            if (Math.hypot(alt.x - p.x, alt.y - p.y) > 1e-4) { p.x = alt.x; p.y = alt.y; moved = true; break; }
+          }
+          bs.stuck = moved ? 0 : (bs.stuck || 0) + 1;
+          if (bs.stuck > 30) { bs.goal = null; bs.path = null; bs.stuck = 0; }
+        } else {
+          if (Math.abs(next.x - p.x) > 1e-4) p.facing = next.x > p.x ? 1 : -1;
+          p.x = next.x;
+          p.y = next.y;
+          p.moving = true;
+        }
+        continue;
+      }
+
+      p.moving = false;
+      // chegou ao objetivo
+      if (goal.type === 'task') {
+        const task = this.tasks.find((t) => t.key === goal.taskKey);
+        if (task) {
+          // "executa" a tarefa por alguns segundos, como um humano faria
+          if (!bs.taskUntil) bs.taskUntil = now + rand(1200, 3200);
+          if (now >= bs.taskUntil) {
+            const total = this.taskSteps(task);
+            for (let i = 0; i < total; i++) this.advanceTask(p.id, task.key, { consoleId: goal.consoleId, data: 'bot' });
+            bs.taskUntil = 0;
+          } else {
+            continue; // fica no console até concluir
+          }
+        }
+      } else if (goal.type === 'kill') {
+        const victim = this.players.get(goal.targetId);
+        if (victim?.alive) {
+          const r = this.kill(p.id, goal.targetId);
+          if (r.error) {
+            bs.killError = r.error;
+            // se não deu para matar (alcance), tenta de novo em seguida
+            bs.idleUntil = now + 300;
+            p.killReadyAt = Math.min(p.killReadyAt, now + 500);
+          }
+        }
+      } else if (goal.type === 'report') {
+        const body = this.bodies.find((b) => b.id === goal.bodyId);
+        if (body) {
+          const r = this.report(body.id, p.id);
+          if (r.error) bs.reportError = r.error;
+        }
+      } else if (goal.type === 'fixSabotage') {
+        if (this.sabotage) this.fixSabotage(p.id, this.sabotage.roomId);
+      }
+      bs.goal = null;
+      bs.idleUntil = now + rand(60, 220);
+    }
+  }
+
+  pickBotGoal(p, now) {
+    if (now < p.botState.idleUntil) return null;
+    const alive = [...this.players.values()].filter((x) => x.alive);
+    const imps = alive.filter((x) => x.role === 'impostor');
+
+    // tripulantes consertam sabotagem primeiro
+    if (p.role === 'crew' && this.sabotage) {
+      const room = this.ship.roomById[this.sabotage.roomId];
+      if (room) {
+        const pt = consolePointForRoom(room, this.ship);
+        // reator exige 2 pessoas: espalha em cantos opostos para não empatar no mesmo ponto
+        if (this.sabotage.type === 'reactor') {
+          const others = [...this.players.values()].filter((x) => x.isBot && x.role === 'crew' && x.botState?.goal?.type === 'fixSabotage');
+          const [rx1, ry1, rx2, ry2] = room.parts[0];
+          const side = others.length % 2;
+          const tx = side ? rx2 - 1.2 : rx1 + 1.2;
+          const ty = side ? ry2 - 1.2 : ry1 + 1.2;
+          if (this.ship.roomAt(tx, ty) === room.id) return { x: tx, y: ty, type: 'fixSabotage' };
+        }
+        return { x: pt.x, y: pt.y, type: 'fixSabotage' };
+      }
+    }
+
+    // reportar corpos por perto (alcance maior: bots "veem" a sala)
+    if (p.role === 'crew') {
+      let closest = null;
+      const myRoom = this.ship.roomAt(p.x, p.y);
+      for (const b of this.bodies) {
+        const d = dist(p, b);
+        const seen = d < 3 || (myRoom && this.ship.roomAt(b.x, b.y) === myRoom);
+        if (seen && (!closest || d < closest.d)) closest = { ...b, d };
+      }
+      if (closest) return { x: closest.x, y: closest.y, type: 'report', bodyId: closest.id };
+    }
+
+    if (p.role === 'impostor') {
+      // sabotagem ocasional
+      if (!this.sabotage && now > this.sabotageReadyAt && Math.random() < 0.08) {
+        const allowed = MAP_SABOTAGES[this.settings.map] || [];
+        this.startSabotage(p.id, allowed[Math.floor(Math.random() * allowed.length)]);
+      }
+      // caça: sempre persegue o tripulante mais próximo quando o kill está pronto
+      const victims = alive.filter((x) => x.role === 'crew');
+      if (victims.length) {
+        const ready = now >= p.killReadyAt;
+        // prefere alvos isolados (sem outro tripulante por perto)
+        const scored = victims.map((v) => {
+          const witnesses = victims.filter((o) => o.id !== v.id && dist(o, v) < 5).length;
+          return { v, score: dist(p, v) + witnesses * 12 };
+        }).sort((a, b) => a.score - b.score);
+        const closest = scored[0].v;
+        if (ready) {
+          return { x: closest.x, y: closest.y, type: 'kill', targetId: closest.id };
+        }
+        // sem kill pronto: segue o alvo mais próximo de longe (parece "seguir")
+        if (Math.random() < 0.4) return { x: closest.x, y: closest.y, type: 'wander' };
+        // sem kill pronto: ronda perto das vítimas
+        return { x: closest.x, y: closest.y, type: 'wander' };
+      }
+      const room = this.ship.rooms[Math.floor(Math.random() * this.ship.rooms.length)];
+      const pt = consolePointForRoom(room);
+      return { x: pt.x, y: pt.y, type: 'wander' };
+    }
+
+    // tripulante: próxima tarefa pendente
+    const pending = p.tasks.filter((key) => {
+      const t = this.tasks.find((x) => x.key === key);
+      return t && !t.completedBy.has(p.id);
+    });
+    if (!pending.length) {
+      const room = this.ship.rooms[Math.floor(Math.random() * this.ship.rooms.length)];
+      const pt = consolePointForRoom(room);
+      return { x: pt.x, y: pt.y, type: 'wander' };
+    }
+    // escolhe a tarefa pendente mais próxima, evitando consoles já ocupados
+    const busy = new Map();
+    for (const other of this.players.values()) {
+      if (other.id === p.id || !other.isBot || !other.botState?.goal) continue;
+      const g = other.botState.goal;
+      if (g.type === 'task' && g.consoleId != null) busy.set(g.consoleId, (busy.get(g.consoleId) || 0) + 1);
+    }
+    const withPos = pending.map((key) => {
+      const t = this.tasks.find((x) => x.key === key);
+      const prog = t.progress[p.id] || { step: 0 };
+      const c = t.consoles[Math.min(prog.step, t.consoles.length - 1)] || t.consoles[0];
+      if (!c) return null;
+      const crowd = busy.get(c.id) || 0;
+      return { key, c, score: Math.hypot(c.x - p.x, c.y - p.y) * (1 + crowd * 1.8) };
+    }).filter(Boolean).sort((a, b) => a.score - b.score);
+    if (!withPos.length) return null;
+    const pick = withPos[0];
+    const key = pick.key;
+    const task = this.tasks.find((t) => t.key === key);
+    const prog = task.progress[p.id] || { step: 0 };
+    const console_ = task.consoles[Math.min(prog.step, task.consoles.length - 1)];
+    return { x: console_.x, y: console_.y, type: 'task', taskKey: key, consoleId: console_.id };
+  }
+
+  /* ============================ serialização ============================ */
   serialize(forId) {
     const me = this.players.get(forId);
-    const viewerIsImpostor = me?.role === 'impostor';
+    const isImp = me?.role === 'impostor';
     const now = Date.now();
-    const players = [...this.players.values()].map((p) => ({
-      id: p.id,
-      name: p.name,
-      color: p.color,
-      x: p.x,
-      y: p.y,
-      facing: p.facing,
-      moving: p.moving,
-      alive: p.alive,
-      role:
-        p.id === forId || this.state === 'ended' || (viewerIsImpostor && p.role === 'impostor')
-          ? p.role
-          : null,
-      isBot: p.isBot,
-      kills: p.id === forId ? p.kills : undefined,
-      votedFor: p.voted && p.id !== forId ? p.votedFor : undefined,
-      voted: p.voted,
-      ready: p.ready,
-      isHost: p.id === this.hostId,
-      ejected: p.ejected || false,
-    }));
+    const showTaskBar = this.settings.taskBarMode === 0
+      ? true
+      : this.settings.taskBarMode === 1
+        ? this.state === 'meeting' || this.state === 'ended'
+        : false;
+    const liveProgress = this.currentTaskProgress();
 
-    const myTasks = (me?.tasks || []).map((tid) => {
-      const t = this.tasks.find((x) => x.id === tid);
-      return t ? { id: t.id, name: t.name, room: t.room, type: t.type, x: t.x, y: t.y, done: t.completedBy.includes(forId), progress: t.progress } : null;
+    const myTasks = (me?.tasks || []).map((key) => {
+      const t = this.tasks.find((x) => x.key === key);
+      if (!t) return null;
+      const prog = t.progress[forId] || { step: 0 };
+      const stepConsole = t.consoles[Math.min(prog.step, t.consoles.length - 1)] || t.consoles[0];
+      return {
+        key: t.key,
+        name: t.name,
+        game: t.game,
+        length: t.length,
+        consoles: t.consoles,
+        room: stepConsole?.room || t.consoles[0]?.room || '',
+        target: stepConsole ? { x: stepConsole.x, y: stepConsole.y } : null,
+        step: prog.step,
+        totalSteps: this.taskSteps(t),
+        done: t.completedBy.has(forId),
+      };
     }).filter(Boolean);
 
-    const globalTasks = this.state === 'lobby' ? [] : this.tasks.map((t) => ({ id: t.id, name: t.name, room: t.room, type: t.type, x: t.x, y: t.y }));
-
-    const crewPlayers = [...this.players.values()].filter((p) => p.role === 'crew');
-    const totalTasks = crewPlayers.length * this.settings.crewTasks;
-    const doneTasks = crewPlayers.reduce((acc, p) => acc + p.tasksDone, 0);
+    const players = [...this.players.values()].map((p) => {
+      const revealRole = this.state === 'ended' || p.id === forId || (isImp && p.role === 'impostor');
+      return {
+        id: p.id,
+        name: p.name,
+        color: p.color,
+        x: p.x,
+        y: p.y,
+        facing: p.facing,
+        moving: p.moving,
+        alive: p.alive,
+        isBot: p.isBot,
+        isHost: p.id === this.hostId,
+        role: revealRole ? p.role : null,
+        voted: p.voted,
+        inVent: p.id === forId ? p.inVent : false,
+        ejected: p.ejected || false,
+        taskCount: p.tasks?.length || 0,
+      };
+    });
 
     return {
       code: this.code,
       state: this.state,
-      hostId: this.hostId,
-      settings: this.settings,
-      map: this.map,
-      you: me ? { id: me.id, role: me.role, alive: me.alive, tasks: myTasks, killReadyAt: me.killCooldownEnd, kills: me.kills, inVent: me.inVent } : null,
-      players,
-      tasks: globalTasks,
-      bodies: this.bodies,
-      sabotage: this.sabotage ? { type: this.sabotage.type, endsAt: this.sabotage.endsAt, fixed: this.sabotage.fixed || 0 } : null,
-      lightsOut: this.lightsOut,
-      emergencyUsed: this.emergencyUsed,
-      meeting: this.meeting,
-      voteCounts: this.state === 'meeting' ? this.tallyVotes() : {},
-      myVote: this.votes.get(forId) || null,
-      votesCast: this.votes.size,
-      taskProgress: { done: doneTasks, total: totalTasks },
-      winner: this.winner,
-      log: this.log.slice(-6),
       now,
-      vents: VENTS,
-      endedAt: this.endedAt,
+      hostId: this.hostId,
+      round: this.round,
+      settings: this.settings,
+      ship: {
+        mapId: this.settings.map,
+        spaces: this.ship.rooms.map((r) => ({
+          id: r.id, name: r.name, parts: r.parts, props: r.props || [], radius: r.radius,
+        })),
+        corridors: this.ship.mapId === 'skeld' ? undefined : [],
+        vents: isImp || this.state === 'ended' ? this.ship.data.vents : [],
+        doors: this.ship.serializedDoors(),
+        emergency: this.ship.emergency,
+      },
+      you: me ? {
+        id: me.id,
+        role: me.role,
+        roleType: me.roleType,
+        alive: me.alive,
+        color: me.color,
+        tasks: myTasks,
+        killReadyAt: me.killReadyAt,
+        killCooldownMs: this.settings.killCooldown * 1000,
+        kills: me.kills,
+        inVent: me.inVent,
+        ventId: me.ventId,
+        impostorTeammates: isImp
+          ? [...this.players.values()].filter((p) => p.role === 'impostor' && p.id !== forId).map((p) => ({ id: p.id, name: p.name, color: p.color }))
+          : [],
+      } : null,
+      players,
+      bodies: this.bodies,
+      sabotage: this.sabotage ? {
+        type: this.sabotage.type,
+        endsAt: this.sabotage.endsAt,
+        roomId: this.sabotage.roomId,
+        fixed: this.sabotage.fixedBy.length,
+        required: this.sabotage.requiredFixes,
+        name: SABOTAGE_INFO[this.sabotage.type]?.name,
+      } : null,
+      lightsOut: this.sabotage?.type === 'lights',
+      commsDown: this.sabotage?.type === 'comms',
+      meeting: this.meeting,
+      votes: this.state === 'meeting'
+        ? Object.fromEntries([...this.players.values()].filter((p) => p.voted).map((p) => [p.id, this.settings.anonymousVotes && p.id !== forId ? null : p.votedFor]))
+        : {},
+      myVote: me?.votedFor || null,
+      voteTally: this.state === 'meeting' && this.meeting?.done ? this.meeting.voteTally : null,
+      taskBar: showTaskBar ? (this.settings.taskBarMode === 0 ? liveProgress : this.taskBarSnapshot) : null,
+      taskBarMode: this.settings.taskBarMode,
+      taskProgress: this.state === 'ended' ? liveProgress : undefined,
+      winner: this.winner,
+      gameOverReason: this.gameOverReason,
+      emergencyUsed: this.emergencyUsed,
+      emergencyLeft: this.settings.emergencyMeetings - this.emergencyUsed,
+      sabotageReadyAt: this.sabotageReadyAt,
+      log: this.log.slice(-12),
+      startedAt: this.startedAt,
     };
   }
 
-  pushUpdate() {
+  push() {
     this.onUpdate?.();
   }
+}
+
+function consolePointForRoom(room, ship) {
+  // o centro do bounding box pode cair fora do chão (salas em L): procura o ponto
+  // navegável mais próximo do centro
+  const [x1, y1, x2, y2] = room.parts[0];
+  const cx = (x1 + x2) / 2;
+  const cy = (y1 + y2) / 2;
+  if (!ship) return { x: cx, y: cy };
+  if (ship.isWalkable(cx, cy) && ship.roomAt(cx, cy) === room.id) return { x: cx, y: cy };
+  let best = null;
+  let bestD = Infinity;
+  for (let x = x1; x <= x2; x += 0.4) {
+    for (let y = y1; y <= y2; y += 0.4) {
+      if (ship.roomAt(x, y) !== room.id) continue;
+      const d = Math.hypot(x - cx, y - cy);
+      if (d < bestD) { bestD = d; best = { x, y }; }
+    }
+  }
+  return best || { x: cx, y: cy };
 }

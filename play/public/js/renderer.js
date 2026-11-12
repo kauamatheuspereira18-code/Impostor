@@ -1,0 +1,540 @@
+/* Renderização do mapa Skeld com a geometria real do navio. */
+import { GAME_CONSTANTS } from '/shared/rules.js';
+import { COLORS } from '/shared/mapdata.js';
+
+const VIEW = { x1: -27.5, y1: -19, x2: 23, y2: 11 };
+
+export class Renderer {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.dpr = Math.min(2, window.devicePixelRatio || 1);
+    this.camera = { x: -2, y: -2 };
+    this.zoom = 1;
+    this.resize();
+  }
+
+  resize() {
+    const rect = this.canvas.getBoundingClientRect();
+    this.w = rect.width;
+    this.h = rect.height;
+    this.canvas.width = Math.floor(this.w * this.dpr);
+    this.canvas.height = Math.floor(this.h * this.dpr);
+    this.fitZoom();
+  }
+
+  fitZoom() {
+    const vw = VIEW.x2 - VIEW.x1;
+    const vh = VIEW.y2 - VIEW.y1;
+    this.baseZoom = Math.min(this.w / vw, this.h / vh);
+    this.zoom = this.baseZoom;
+  }
+
+  worldToScreen(x, y) {
+    return {
+      x: (x - this.camera.x) * this.zoom + this.w / 2,
+      y: (this.h / 2) - (y - this.camera.y) * this.zoom,
+    };
+  }
+
+  screenToWorld(sx, sy) {
+    return {
+      x: (sx - this.w / 2) / this.zoom + this.camera.x,
+      y: (this.h / 2 - sy) / this.zoom + this.camera.y,
+    };
+  }
+
+  follow(player) {
+    if (!player) return;
+    this.camera.x += (player.x - this.camera.x) * 0.15;
+    this.camera.y += (player.y - this.camera.y) * 0.15;
+  }
+
+  render(state, me, opts = {}) {
+    const { ctx } = this;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.clearRect(0, 0, this.w, this.h);
+    if (!state) return;
+
+    const lightsOut = !!state.lightsOut;
+    const vision = me?.role === 'impostor' ? state.settings.impostorVision : state.settings.crewVision;
+    const dark = lightsOut ? 0.94 : (me?.role === 'impostor' ? 0.55 : 0.72);
+
+    ctx.fillStyle = '#04060b';
+    ctx.fillRect(0, 0, this.w, this.h);
+    this.drawSpace();
+    this.drawShip(state, opts);
+
+    const scaleZ = this.zoom;
+    // corpos
+    for (const body of state.bodies || []) this.drawBody(body, scaleZ);
+    // jogadores
+    for (const p of state.players) {
+      if (!p.alive) continue;
+      if (p.inVent && p.id !== me?.id) continue;
+      this.drawPlayer(p, p.id === me?.id, scaleZ, state);
+    }
+    // fantasmas
+    for (const p of state.players) {
+      if (p.alive) continue;
+      this.drawGhost(p, scaleZ, state);
+    }
+    // dutos para impostor
+    if (me?.role === 'impostor' && state.ship?.vents?.length) this.drawVents(state.ship.vents, scaleZ, me);
+    // portas fechadas
+    for (const d of state.ship?.doors || []) {
+      if (d.open) continue;
+      const s = this.worldToScreen(d.x, d.y);
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.fillStyle = '#8b96ad';
+      ctx.fillRect(-0.9 * scaleZ, -0.28 * scaleZ, 1.8 * scaleZ, 0.56 * scaleZ);
+      ctx.strokeStyle = '#e2e8f5';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(-0.9 * scaleZ, -0.28 * scaleZ, 1.8 * scaleZ, 0.56 * scaleZ);
+      ctx.restore();
+    }
+
+    // escuridão / visão
+    this.drawVision(me, state, dark, vision);
+
+    if (state.commsDown) this.drawCommsStatic();
+    if (lightsOut) this.drawElectricalFlicker();
+  }
+
+  drawSpace() {
+    const { ctx } = this;
+    ctx.fillStyle = '#050810';
+    ctx.fillRect(0, 0, this.w, this.h);
+    // estrelas fixas
+    ctx.fillStyle = 'rgba(200,220,255,0.35)';
+    for (let i = 0; i < 90; i++) {
+      const x = ((i * 379) % this.w);
+      const y = ((i * 211) % this.h);
+      const s = i % 7 === 0 ? 2 : 1;
+      ctx.globalAlpha = 0.25 + ((i * 37) % 60) / 100;
+      ctx.fillRect(x, y, s, s);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /** Desenha as salas/corredores do navio. */
+  drawShip(state, opts = {}) {
+    const { ctx } = this;
+    const spaces = state.ship?.spaces || [];
+    const z = this.zoom;
+
+    // chão (união dos retângulos)
+    for (const space of spaces) {
+      for (const part of space.parts) {
+        this.fillRectWorld(part, '#1b2436');
+      }
+    }
+    // corredores por cima do chão (um pouco mais escuros)
+    if (opts.corridors) {
+      for (const c of opts.corridors) {
+        for (const part of c.parts) this.fillRectWorld(part, '#161e2d');
+      }
+    }
+
+    // bordas: desenha contorno de cada parte
+    ctx.save();
+    ctx.strokeStyle = 'rgba(120, 155, 210, 0.55)';
+    ctx.lineWidth = Math.max(2, 2.4 * z * 0.5);
+    for (const space of spaces) {
+      for (const part of space.parts) this.strokeRectWorld(part);
+    }
+    ctx.restore();
+
+    // props e consoles
+    for (const space of spaces) {
+      const label = space.name;
+      const [x1, y1, x2, y2] = space.parts[0];
+      this.drawRoomLabel(label, (x1 + x2) / 2, y2 - 0.55, space.id);
+      for (const p of space.props || []) this.drawProp(p, z, state);
+    }
+
+    // tarefas do jogador (marcadores)
+    if (state.you?.role === 'crew') {
+      for (const t of state.you.tasks || []) {
+        if (t.done) continue;
+        for (const c of t.consoles) this.drawTaskMarker(c, state);
+      }
+    }
+    // botão de emergência
+    if (state.ship?.emergency) {
+      const e = state.ship.emergency;
+      const s = this.worldToScreen(e.x, e.y);
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.fillStyle = '#c62b3b';
+      ctx.beginPath();
+      ctx.arc(0, 0, 0.42 * z, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#ffd7db';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  fillRectWorld([x1, y1, x2, y2], color) {
+    const { ctx } = this;
+    const a = this.worldToScreen(x1, y2);
+    const b = this.worldToScreen(x2, y1);
+    ctx.fillStyle = color;
+    ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y);
+  }
+
+  strokeRectWorld([x1, y1, x2, y2]) {
+    const { ctx } = this;
+    const a = this.worldToScreen(x1, y2);
+    const b = this.worldToScreen(x2, y1);
+    ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+  }
+
+  drawRoomLabel(text, x, y, id) {
+    const { ctx } = this;
+    const s = this.worldToScreen(x, y);
+    ctx.save();
+    ctx.fillStyle = 'rgba(190, 210, 240, 0.42)';
+    ctx.font = `600 ${Math.max(9, this.zoom * 0.5)}px "Trebuchet MS", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(text.toUpperCase(), s.x, s.y);
+    ctx.restore();
+  }
+
+  drawProp(p, z, state) {
+    const { ctx } = this;
+    const s = this.worldToScreen(p.x, p.y);
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    switch (p.type) {
+      case 'table': {
+        ctx.fillStyle = '#2c3d59';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, (p.r || 1.5) * z, (p.r || 1.5) * z * 1.6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#4d6a94';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        break;
+      }
+      case 'console': {
+        const w = (p.w || 1.2) * z;
+        const h = (p.h || 0.7) * z;
+        ctx.fillStyle = '#39506f';
+        ctx.fillRect(-w / 2, -h / 2, w, h);
+        ctx.fillStyle = 'rgba(120, 220, 255, 0.85)';
+        ctx.fillRect(-w / 2 + 2, -h / 2 + 2, w - 4, h / 2.4);
+        ctx.strokeStyle = '#7ea6d8';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(-w / 2, -h / 2, w, h);
+        break;
+      }
+      case 'crate': {
+        const w = (p.w || 1.2) * z;
+        const h = (p.h || 1.1) * z;
+        ctx.fillStyle = '#6b4a2b';
+        ctx.fillRect(-w / 2, -h / 2, w, h);
+        ctx.strokeStyle = '#a97b4a';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(-w / 2, -h / 2, w, h);
+        ctx.beginPath();
+        ctx.moveTo(-w / 2, -h / 2);
+        ctx.lineTo(w / 2, h / 2);
+        ctx.moveTo(w / 2, -h / 2);
+        ctx.lineTo(-w / 2, h / 2);
+        ctx.stroke();
+        break;
+      }
+      case 'plant': {
+        ctx.fillStyle = '#2f7d4a';
+        ctx.beginPath();
+        ctx.arc(0, 0, 0.42 * z, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#3f9a5d';
+        ctx.beginPath();
+        ctx.arc(-0.16 * z, -0.12 * z, 0.28 * z, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'bench': {
+        ctx.fillStyle = '#33445f';
+        ctx.fillRect(-(p.w || 2) * z / 2, -(p.h || 0.9) * z / 2, (p.w || 2) * z, (p.h || 0.9) * z);
+        break;
+      }
+      case 'trash': {
+        ctx.fillStyle = '#3a4a63';
+        ctx.fillRect(-0.35 * z, -0.35 * z, 0.7 * z, 0.7 * z);
+        break;
+      }
+      case 'window': {
+        ctx.fillStyle = 'rgba(120, 200, 255, 0.28)';
+        ctx.fillRect(-(p.w || 0.7) * z / 2, -(p.h || 4) * z / 2, (p.w || 0.7) * z, (p.h || 4) * z);
+        break;
+      }
+      case 'panel': {
+        ctx.fillStyle = '#2b3b54';
+        ctx.fillRect(-(p.w || 2) * z / 2, -(p.h || 0.5) * z / 2, (p.w || 2) * z, (p.h || 0.5) * z);
+        ctx.fillStyle = 'rgba(90, 220, 160, 0.65)';
+        ctx.fillRect(-(p.w || 2) * z / 2 + 2, -(p.h || 0.5) * z / 2 + 2, ((p.w || 2) * z) / 3, (p.h || 0.5) * z - 4);
+        break;
+      }
+      case 'bed': {
+        ctx.fillStyle = '#c9d6ea';
+        ctx.fillRect(-(p.w || 1.2) * z / 2, -(p.h || 2) * z / 2, (p.w || 1.2) * z, (p.h || 2) * z);
+        break;
+      }
+      case 'cameras': {
+        ctx.fillStyle = '#1f2b3d';
+        ctx.fillRect(-(p.w || 1.6) * z / 2, -(p.h || 0.6) * z / 2, (p.w || 1.6) * z, (p.h || 0.6) * z);
+        ctx.fillStyle = '#ff5c6c';
+        ctx.beginPath();
+        ctx.arc(0, 0, 0.16 * z, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'chair': {
+        ctx.fillStyle = '#2b3a52';
+        ctx.beginPath();
+        ctx.arc(0, 0, 0.34 * z, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'reactorCore': {
+        ctx.fillStyle = 'rgba(90, 255, 220, 0.35)';
+        ctx.beginPath();
+        ctx.arc(0, 0, (p.r || 1.4) * z, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(150, 255, 240, 0.8)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        break;
+      }
+      case 'turbine': {
+        ctx.save();
+        ctx.rotate((performance.now() / 900) % (Math.PI * 2));
+        ctx.strokeStyle = '#7fa7d6';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, 0, (p.r || 1.4) * z, 0, Math.PI * 2);
+        ctx.stroke();
+        for (let i = 0; i < 4; i++) {
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(Math.cos((i * Math.PI) / 2) * (p.r || 1.4) * z, Math.sin((i * Math.PI) / 2) * (p.r || 1.4) * z);
+          ctx.stroke();
+        }
+        ctx.restore();
+        break;
+      }
+      case 'shieldGen': {
+        ctx.strokeStyle = 'rgba(120, 200, 255, 0.7)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, (p.r || 1.4) * z, 0, Math.PI * 2);
+        ctx.stroke();
+        break;
+      }
+      default: break;
+    }
+    ctx.restore();
+  }
+
+  drawTaskMarker(console_, state) {
+    const { ctx } = this;
+    const s = this.worldToScreen(console_.x, console_.y);
+    const t = (performance.now() / 1000) % 2;
+    const pulse = 1 + Math.sin(t * Math.PI * 2) * 0.15;
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.scale(pulse, pulse);
+    ctx.fillStyle = 'rgba(255, 214, 64, 0.92)';
+    ctx.beginPath();
+    ctx.arc(0, 0, Math.max(6, this.zoom * 0.3), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#2a2200';
+    ctx.font = `bold ${Math.max(9, this.zoom * 0.34)}px "Trebuchet MS"`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('!', 0, 1);
+    ctx.restore();
+  }
+
+  drawVents(vents, z, me) {
+    const { ctx } = this;
+    for (const v of vents) {
+      const s = this.worldToScreen(v.x, v.y);
+      const active = me?.ventId === v.id;
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.fillStyle = active ? 'rgba(120, 255, 200, 0.7)' : 'rgba(90, 200, 255, 0.35)';
+      ctx.beginPath();
+      ctx.roundRect(-0.42 * z, -0.32 * z, 0.84 * z, 0.64 * z, 0.12 * z);
+      ctx.fill();
+      ctx.strokeStyle = active ? 'rgba(180, 255, 230, 0.95)' : 'rgba(150, 225, 255, 0.75)';
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+      ctx.beginPath();
+      for (let i = -1; i <= 1; i++) {
+        ctx.moveTo(-0.24 * z, i * 0.15 * z);
+        ctx.lineTo(0.24 * z, i * 0.15 * z);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  drawPlayer(p, isMe, z, state) {
+    const { ctx } = this;
+    const col = COLORS[p.color] || COLORS[0];
+    const s = this.worldToScreen(p.x, p.y);
+    const bob = p.moving ? Math.sin(performance.now() / 110) * 0.05 * z : 0;
+    ctx.save();
+    ctx.translate(s.x, s.y + bob);
+    const bodyH = 0.86 * z;
+    const bodyW = 0.66 * z;
+
+    if (isMe) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(0, 0.1 * z, 0.62 * z, 0.44 * z, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // sombra
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(0, 0.4 * z, 0.36 * z, 0.14 * z, 0, 0, Math.PI * 2);
+    ctx.fill();
+    this.drawBean(0, 0, col.hex, col.visor, bodyW, bodyH, p.facing, isMe, state?.you?.role === 'impostor' && p.role === 'impostor');
+    // nome
+    ctx.font = `700 ${Math.max(9, z * 0.36)}px "Trebuchet MS"`;
+    ctx.textAlign = 'center';
+    const label = p.name;
+    const w = ctx.measureText(label).width + 8;
+    ctx.fillStyle = 'rgba(4,8,14,0.72)';
+    ctx.beginPath();
+    ctx.roundRect(-w / 2, -0.95 * z, w, 0.38 * z, 0.1 * z);
+    ctx.fill();
+    ctx.fillStyle = isMe ? '#8fe9ff' : 'rgba(232,240,255,0.92)';
+    ctx.fillText(label, 0, -0.68 * z);
+    ctx.restore();
+  }
+
+  drawBean(x, y, color, visor, w, h, facing, isMe, impMate) {
+    const { ctx } = this;
+    ctx.save();
+    ctx.translate(x, y);
+    if (facing < 0) ctx.scale(-1, 1);
+    // corpo
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(-w / 2, -h * 0.62, w, h, w * 0.42);
+    ctx.fill();
+    // pernas
+    ctx.beginPath();
+    ctx.ellipse(-w * 0.2, h * 0.34, w * 0.2, h * 0.17, 0, 0, Math.PI * 2);
+    ctx.ellipse(w * 0.2, h * 0.34, w * 0.2, h * 0.17, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // mochila
+    ctx.fillStyle = 'rgba(0,0,0,0.32)';
+    ctx.beginPath();
+    ctx.roundRect(-w * 0.62, -h * 0.42, w * 0.22, h * 0.6, w * 0.1);
+    ctx.fill();
+    // visor
+    ctx.fillStyle = '#a8e0ef';
+    ctx.beginPath();
+    ctx.roundRect(-w * 0.05, -h * 0.44, w * 0.55, h * 0.34, h * 0.17);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.beginPath();
+    ctx.roundRect(w * 0.16, -h * 0.38, w * 0.24, h * 0.12, h * 0.06);
+    ctx.fill();
+    if (impMate) {
+      ctx.fillStyle = '#ff4a5e';
+      ctx.font = `bold ${Math.max(9, w * 0.8)}px "Trebuchet MS"`;
+      ctx.textAlign = 'center';
+      ctx.fillText('▲', 0, -h * 0.78);
+    }
+    ctx.restore();
+  }
+
+  drawGhost(p, z, state) {
+    const { ctx } = this;
+    const col = COLORS[p.color] || COLORS[0];
+    const s = this.worldToScreen(p.x, p.y);
+    ctx.save();
+    ctx.translate(s.x, s.y + Math.sin(performance.now() / 500) * 0.06 * z);
+    ctx.globalAlpha = 0.42;
+    this.drawBean(0, 0, col.hex, col.visor, 0.6 * z, 0.8 * z, p.facing, false);
+    ctx.restore();
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = 'rgba(232,240,255,0.85)';
+    ctx.font = `700 ${Math.max(8, z * 0.3)}px "Trebuchet MS"`;
+    ctx.textAlign = 'center';
+    ctx.fillText(p.name, s.x, s.y - 0.9 * z);
+    ctx.restore();
+  }
+
+  drawBody(body, z) {
+    const { ctx } = this;
+    const col = COLORS[body.color] || COLORS[0];
+    const s = this.worldToScreen(body.x, body.y);
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    // poça/aura vermelha
+    const t = (performance.now() / 900) % 1;
+    ctx.fillStyle = `rgba(180, 20, 40, ${0.18 + Math.sin(t * Math.PI) * 0.08})`;
+    ctx.beginPath();
+    ctx.arc(0, 0, 0.75 * z, 0, Math.PI * 2);
+    ctx.fill();
+    // corpo caído (girado)
+    ctx.rotate(Math.PI / 2.1);
+    this.drawBean(0, 0, col.hex, col.visor, 0.58 * z, 0.78 * z, 1, false);
+    ctx.rotate(-Math.PI / 2.1);
+    // osso
+    ctx.fillStyle = '#eef3ff';
+    ctx.beginPath();
+    ctx.ellipse(0, 0.44 * z, 0.26 * z, 0.1 * z, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  drawVision(me, state, dark, vision) {
+    const { ctx } = this;
+    // círculo de visão ao redor do jogador
+    const center = me ? this.worldToScreen(state.__meX ?? me.x ?? 0, state.__meY ?? me.y ?? 0) : { x: this.w / 2, y: this.h / 2 };
+    const radius = Math.max(this.w, this.h) * (state.lightsOut ? 0.17 : 0.55 / Math.max(0.5, vision / 1));
+    const grad = ctx.createRadialGradient(center.x, center.y, radius * 0.35, center.x, center.y, radius);
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(0.75, `rgba(0,0,0,${dark * 0.55})`);
+    grad.addColorStop(1, `rgba(0,0,0,${dark})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, this.w, this.h);
+  }
+
+  drawCommsStatic() {
+    const { ctx } = this;
+    ctx.save();
+    ctx.globalAlpha = 0.10;
+    ctx.fillStyle = '#7fffd4';
+    for (let i = 0; i < 220; i++) {
+      ctx.fillRect(Math.random() * this.w, Math.random() * this.h, 2, 2);
+    }
+    ctx.restore();
+  }
+
+  drawElectricalFlicker() {
+    const { ctx } = this;
+    const flicker = Math.sin(performance.now() / 90) > 0.85;
+    if (!flicker) return;
+    ctx.save();
+    ctx.globalAlpha = 0.06;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, this.w, this.h);
+    ctx.restore();
+  }
+}
