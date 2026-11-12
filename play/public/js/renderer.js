@@ -26,7 +26,9 @@ export class Renderer {
   fitZoom() {
     const vw = VIEW.x2 - VIEW.x1;
     const vh = VIEW.y2 - VIEW.y1;
-    this.baseZoom = Math.min(this.w / vw, this.h / vh);
+    // zoom "de jogo": a câmera segue o jogador e mostra ~2 salas de largura
+    this.fitScale = Math.min(this.w / vw, this.h / vh);
+    this.baseZoom = Math.max(34, Math.min(62, this.w / 26));
     this.zoom = this.baseZoom;
   }
 
@@ -122,35 +124,27 @@ export class Renderer {
   drawShip(state, opts = {}) {
     const { ctx } = this;
     const spaces = state.ship?.spaces || [];
+    const corridors = opts.corridors || [];
     const z = this.zoom;
 
-    // chão (união dos retângulos)
+    // Piso metálico contínuo (salas + corredores têm o mesmo chão)
     for (const space of spaces) {
-      for (const part of space.parts) {
-        this.fillRectWorld(part, '#1b2436');
-      }
+      for (const part of space.parts) this.fillRectWorld(part, '#63799c');
     }
-    // corredores por cima do chão (um pouco mais escuros)
-    if (opts.corridors) {
-      for (const c of opts.corridors) {
-        for (const part of c.parts) this.fillRectWorld(part, '#161e2d');
-      }
+    for (const c of corridors) {
+      for (const part of c.parts) this.fillRectWorld(part, '#5a6f90');
     }
+    // hachura sutil do piso
+    this.drawFloorTiles([...spaces.flatMap((s) => s.parts), ...corridors.flatMap((c) => c.parts)]);
 
-    // bordas: desenha contorno de cada parte
-    ctx.save();
-    ctx.strokeStyle = 'rgba(120, 155, 210, 0.55)';
-    ctx.lineWidth = Math.max(2, 2.4 * z * 0.5);
-    for (const space of spaces) {
-      for (const part of space.parts) this.strokeRectWorld(part);
-    }
-    ctx.restore();
+    // cada sala tem sua parede (contorno da união das partes); corredores não têm
+    for (const space of spaces) this.strokeUnionOutline(space.parts, z);
 
     // props e consoles
     for (const space of spaces) {
       const label = space.name;
       const [x1, y1, x2, y2] = space.parts[0];
-      this.drawRoomLabel(label, (x1 + x2) / 2, y2 - 0.55, space.id);
+      this.drawRoomLabel(label, (x1 + x2) / 2, y2 - 0.75, space.id);
       for (const p of space.props || []) this.drawProp(p, z, state);
     }
 
@@ -178,6 +172,82 @@ export class Renderer {
     }
   }
 
+  /** Hachura de placas do piso, para dar textura metálica. */
+  drawFloorTiles(parts) {
+    const { ctx } = this;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    const STEP = 1.6;
+    for (const [x1, y1, x2, y2] of parts) {
+      for (let x = Math.ceil(x1 / STEP) * STEP; x < x2; x += STEP) {
+        if (x <= x1 + 0.05) continue;
+        const a = this.worldToScreen(x, y1);
+        const b = this.worldToScreen(x, y2);
+        ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+      }
+      for (let y = Math.ceil(y1 / STEP) * STEP; y < y2; y += STEP) {
+        if (y <= y1 + 0.05) continue;
+        const a = this.worldToScreen(x1, y);
+        const b = this.worldToScreen(x2, y);
+        ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /** Contorno de uma sala: arestas que não têm outra parte da mesma sala do lado. */
+  strokeUnionOutline(parts, z) {
+    const { ctx } = this;
+    const EPS = 0.12;
+    const covered = (x, y) => parts.some(([x1, y1, x2, y2]) =>
+      x >= x1 - EPS && x <= x2 + EPS && y >= y1 - EPS && y <= y2 + EPS);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(205, 224, 250, 0.95)';
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'square';
+    ctx.beginPath();
+    for (const [x1, y1, x2, y2] of parts) {
+      const mx = (x1 + x2) / 2;
+      const my = (y1 + y2) / 2;
+      if (!covered(mx, y2 + 0.25)) { const a = this.worldToScreen(x1, y2), b = this.worldToScreen(x2, y2); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
+      if (!covered(mx, y1 - 0.25)) { const a = this.worldToScreen(x1, y1), b = this.worldToScreen(x2, y1); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
+      if (!covered(x1 - 0.25, my)) { const a = this.worldToScreen(x1, y1), b = this.worldToScreen(x1, y2); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
+      if (!covered(x2 + 0.25, my)) { const a = this.worldToScreen(x2, y1), b = this.worldToScreen(x2, y2); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /** Contorno da união: cada aresta só é desenhada se não houver vizinho do outro lado. */
+  strokeFloorOutline(parts, z) {
+    const { ctx } = this;
+    const EPS = 0.045;
+    const covered = (x, y) => parts.some(([x1, y1, x2, y2]) =>
+      x >= x1 - EPS && x <= x2 + EPS && y >= y1 - EPS && y <= y2 + EPS);
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(128, 165, 220, 0.85)';
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'square';
+    ctx.beginPath();
+    for (const [x1, y1, x2, y2] of parts) {
+      const midX = (x1 + x2) / 2;
+      const midY = (y1 + y2) / 2;
+      const h = 0.06;
+      // topo / base
+      if (!covered(midX, y2 + 0.12)) { const a = this.worldToScreen(x1, y2); const b = this.worldToScreen(x2, y2); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
+      if (!covered(midX, y1 - 0.12)) { const a = this.worldToScreen(x1, y1); const b = this.worldToScreen(x2, y1); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
+      // esquerda / direita
+      if (!covered(x1 - 0.12, midY)) { const a = this.worldToScreen(x1, y1); const b = this.worldToScreen(x1, y2); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
+      if (!covered(x2 + 0.12, midY)) { const a = this.worldToScreen(x2, y1); const b = this.worldToScreen(x2, y2); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
   fillRectWorld([x1, y1, x2, y2], color) {
     const { ctx } = this;
     const a = this.worldToScreen(x1, y2);
@@ -197,8 +267,8 @@ export class Renderer {
     const { ctx } = this;
     const s = this.worldToScreen(x, y);
     ctx.save();
-    ctx.fillStyle = 'rgba(190, 210, 240, 0.42)';
-    ctx.font = `600 ${Math.max(9, this.zoom * 0.5)}px "Trebuchet MS", sans-serif`;
+    ctx.fillStyle = 'rgba(232, 243, 255, 0.8)';
+    ctx.font = `700 ${Math.max(10, this.zoom * 0.48)}px "Trebuchet MS", sans-serif`;
     ctx.textAlign = 'center';
     ctx.fillText(text.toUpperCase(), s.x, s.y);
     ctx.restore();
@@ -211,13 +281,94 @@ export class Renderer {
     ctx.translate(s.x, s.y);
     switch (p.type) {
       case 'table': {
-        ctx.fillStyle = '#2c3d59';
+        const r = (p.r || 0.95) * z;
+        ctx.fillStyle = '#54637a';
         ctx.beginPath();
-        ctx.ellipse(0, 0, (p.r || 1.5) * z, (p.r || 1.5) * z * 1.6, 0, 0, Math.PI * 2);
+        ctx.ellipse(0, 0, r, r * 1.08, 0, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = '#4d6a94';
-        ctx.lineWidth = 2;
+        ctx.fillStyle = '#8fa3bd';
+        ctx.beginPath();
+        ctx.ellipse(0, -r * 0.06, r * 0.82, r * 0.9, 0, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'chair': {
+        ctx.fillStyle = '#465268';
+        ctx.beginPath();
+        ctx.arc(0, 0, 0.3 * z, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'engine': {
+        const r = (p.r || 1.6) * z;
+        ctx.strokeStyle = 'rgba(150, 190, 240, 0.55)';
+        ctx.lineWidth = Math.max(2, 2.2 * z * 0.12);
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
         ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-r, -r); ctx.lineTo(r, r);
+        ctx.moveTo(-r, r); ctx.lineTo(r, -r);
+        ctx.stroke();
+        break;
+      }
+      case 'reactor': {
+        const r = (p.r || 1.5) * z;
+        ctx.strokeStyle = 'rgba(120, 255, 190, 0.5)';
+        ctx.lineWidth = Math.max(2, 2.4 * z * 0.12);
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.stroke();
+        break;
+      }
+      case 'shieldGen': {
+        const r = (p.r || 1.4) * z;
+        ctx.strokeStyle = 'rgba(140, 200, 255, 0.55)';
+        ctx.lineWidth = Math.max(2, 2 * z * 0.12);
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.stroke();
+        break;
+      }
+      case 'bed': {
+        const w = (p.w || 1.5) * z, h = (p.h || 0.9) * z;
+        ctx.fillStyle = '#dfe8f5';
+        ctx.fillRect(-w / 2, -h / 2, w, h);
+        ctx.fillStyle = '#9fb8d6';
+        ctx.fillRect(-w / 2, -h / 2, w, h * 0.35);
+        break;
+      }
+      case 'plant': {
+        ctx.fillStyle = '#2f6b47';
+        ctx.beginPath();
+        ctx.arc(0, 0, 0.42 * z, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'bench': {
+        const w = (p.w || 2) * z, h = (p.h || 0.7) * z;
+        ctx.fillStyle = '#33507a';
+        ctx.fillRect(-w / 2, -h / 2, w, h);
+        break;
+      }
+      case 'trash': {
+        ctx.fillStyle = '#4a5c78';
+        ctx.fillRect(-0.35 * z, -0.45 * z, 0.7 * z, 0.9 * z);
+        break;
+      }
+      case 'fuel': {
+        const w = (p.w || 1.1) * z;
+        ctx.fillStyle = '#b8873a';
+        ctx.fillRect(-w / 2, -w / 2, w, w);
+        break;
+      }
+      case 'panel': {
+        const w = (p.w || 1.2) * z, h = (p.h || 0.5) * z;
+        ctx.fillStyle = '#24344d';
+        ctx.fillRect(-w / 2, -h / 2, w, h);
+        ctx.strokeStyle = '#4f7099';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(-w / 2, -h / 2, w, h);
         break;
       }
       case 'console': {
@@ -248,96 +399,8 @@ export class Renderer {
         ctx.stroke();
         break;
       }
-      case 'plant': {
-        ctx.fillStyle = '#2f7d4a';
-        ctx.beginPath();
-        ctx.arc(0, 0, 0.42 * z, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#3f9a5d';
-        ctx.beginPath();
-        ctx.arc(-0.16 * z, -0.12 * z, 0.28 * z, 0, Math.PI * 2);
-        ctx.fill();
+      default:
         break;
-      }
-      case 'bench': {
-        ctx.fillStyle = '#33445f';
-        ctx.fillRect(-(p.w || 2) * z / 2, -(p.h || 0.9) * z / 2, (p.w || 2) * z, (p.h || 0.9) * z);
-        break;
-      }
-      case 'trash': {
-        ctx.fillStyle = '#3a4a63';
-        ctx.fillRect(-0.35 * z, -0.35 * z, 0.7 * z, 0.7 * z);
-        break;
-      }
-      case 'window': {
-        ctx.fillStyle = 'rgba(120, 200, 255, 0.28)';
-        ctx.fillRect(-(p.w || 0.7) * z / 2, -(p.h || 4) * z / 2, (p.w || 0.7) * z, (p.h || 4) * z);
-        break;
-      }
-      case 'panel': {
-        ctx.fillStyle = '#2b3b54';
-        ctx.fillRect(-(p.w || 2) * z / 2, -(p.h || 0.5) * z / 2, (p.w || 2) * z, (p.h || 0.5) * z);
-        ctx.fillStyle = 'rgba(90, 220, 160, 0.65)';
-        ctx.fillRect(-(p.w || 2) * z / 2 + 2, -(p.h || 0.5) * z / 2 + 2, ((p.w || 2) * z) / 3, (p.h || 0.5) * z - 4);
-        break;
-      }
-      case 'bed': {
-        ctx.fillStyle = '#c9d6ea';
-        ctx.fillRect(-(p.w || 1.2) * z / 2, -(p.h || 2) * z / 2, (p.w || 1.2) * z, (p.h || 2) * z);
-        break;
-      }
-      case 'cameras': {
-        ctx.fillStyle = '#1f2b3d';
-        ctx.fillRect(-(p.w || 1.6) * z / 2, -(p.h || 0.6) * z / 2, (p.w || 1.6) * z, (p.h || 0.6) * z);
-        ctx.fillStyle = '#ff5c6c';
-        ctx.beginPath();
-        ctx.arc(0, 0, 0.16 * z, 0, Math.PI * 2);
-        ctx.fill();
-        break;
-      }
-      case 'chair': {
-        ctx.fillStyle = '#2b3a52';
-        ctx.beginPath();
-        ctx.arc(0, 0, 0.34 * z, 0, Math.PI * 2);
-        ctx.fill();
-        break;
-      }
-      case 'reactorCore': {
-        ctx.fillStyle = 'rgba(90, 255, 220, 0.35)';
-        ctx.beginPath();
-        ctx.arc(0, 0, (p.r || 1.4) * z, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(150, 255, 240, 0.8)';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        break;
-      }
-      case 'turbine': {
-        ctx.save();
-        ctx.rotate((performance.now() / 900) % (Math.PI * 2));
-        ctx.strokeStyle = '#7fa7d6';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.arc(0, 0, (p.r || 1.4) * z, 0, Math.PI * 2);
-        ctx.stroke();
-        for (let i = 0; i < 4; i++) {
-          ctx.beginPath();
-          ctx.moveTo(0, 0);
-          ctx.lineTo(Math.cos((i * Math.PI) / 2) * (p.r || 1.4) * z, Math.sin((i * Math.PI) / 2) * (p.r || 1.4) * z);
-          ctx.stroke();
-        }
-        ctx.restore();
-        break;
-      }
-      case 'shieldGen': {
-        ctx.strokeStyle = 'rgba(120, 200, 255, 0.7)';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(0, 0, (p.r || 1.4) * z, 0, Math.PI * 2);
-        ctx.stroke();
-        break;
-      }
-      default: break;
     }
     ctx.restore();
   }
@@ -507,11 +570,15 @@ export class Renderer {
     const { ctx } = this;
     // círculo de visão ao redor do jogador
     const center = me ? this.worldToScreen(state.__meX ?? me.x ?? 0, state.__meY ?? me.y ?? 0) : { x: this.w / 2, y: this.h / 2 };
-    const radius = Math.max(this.w, this.h) * (state.lightsOut ? 0.17 : 0.55 / Math.max(0.5, vision / 1));
-    const grad = ctx.createRadialGradient(center.x, center.y, radius * 0.35, center.x, center.y, radius);
-    grad.addColorStop(0, 'rgba(0,0,0,0)');
-    grad.addColorStop(0.75, `rgba(0,0,0,${dark * 0.55})`);
-    grad.addColorStop(1, `rgba(0,0,0,${dark})`);
+    // No jogo a visão é um círculo ao redor do tripulante: claro no centro,
+    // escuro nas bordas. Um único gradiente radial cobre a tela inteira.
+    const worldR = (state.lightsOut ? 2.4 : 5.2) * Math.max(0.5, vision / 1);
+    const radius = Math.max(worldR * this.zoom, 60);
+    // penumbra do jogo: perto é claro, longe fica escuro mas o navio continua visível
+    const grad = ctx.createRadialGradient(center.x, center.y, radius * 0.6, center.x, center.y, radius * 1.5);
+    grad.addColorStop(0, 'rgba(2,5,12,0)');
+    grad.addColorStop(0.45, `rgba(2,5,12,${dark * 0.22})`);
+    grad.addColorStop(1, `rgba(2,5,12,${dark * 0.72})`);
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, this.w, this.h);
   }

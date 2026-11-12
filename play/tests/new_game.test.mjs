@@ -21,7 +21,9 @@ await wait(4000);
 check('estado tasks', st?.state === 'tasks', st?.state);
 check('tem 10 jogadores', st?.players.length === 10, `n=${st?.players.length}`);
 check('recebi papel', !!st?.you?.role, st?.you?.role);
-check('mapa Skeld com salas', st?.ship?.spaces?.length === 13, `salas=${st?.ship?.spaces?.length}`);
+// 13 salas oficiais + Comunicações (sem tarefa própria nos dados, mas presente no mapa)
+check('mapa Skeld com 14 salas', st?.ship?.spaces?.length === 14, `salas=${st?.ship?.spaces?.length}`);
+  check('corredores enviados', (st?.ship?.corridors?.length || 0) >= 20, `n=${st?.ship?.corridors?.length}`);
 const isCrew = st.you.role === 'crew';
 if (isCrew) {
   check('tarefas do jogador têm consoles', (st?.you?.tasks?.length || 0) > 0, `tarefas=${st?.you?.tasks?.length}`);

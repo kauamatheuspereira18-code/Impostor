@@ -429,7 +429,11 @@ function frame(now) {
       const meForRender = { ...st.you, x: C.local.x, y: C.local.y };
       // passa as posições locais suavizadas para o render
       const players = st.players.map((p) => (p.id === me.id ? { ...p, x: C.local.x, y: C.local.y } : p));
-      renderer.render({ ...st, players, __meX: C.local.x, __meY: C.local.y }, meForRender);
+      renderer.render(
+        { ...st, players, __meX: C.local.x, __meY: C.local.y },
+        meForRender,
+        { corridors: st.ship?.corridors || [] },
+      );
       renderJoystick();
       updateCooldowns();
       updateActionAvailability();

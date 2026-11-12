@@ -10,9 +10,10 @@ const ALL_PARTS = [
 
 const inRect = (x, y, r) => x >= r[0] && x <= r[2] && y >= r[1] && y <= r[3];
 
-// Frestas: a geometria é feita de retângulos encostados. Um ponto no vão de 0.25
-// entre dois retângulos deve contar como chão (senão os bots travam na costura).
-const STITCH = 0.35;
+// Frestas: retângulos que deveriam se tocar mas ficaram com um vão mínimo.
+// A tolerância é pequena de propósito: um valor alto abriria "chão falso" fora
+// das salas e os bots ficariam presos no vazio (já aconteceu com 0.35).
+const STITCH = 0.08;
 function inRectStitched(x, y, r) {
   return x >= r[0] - STITCH && x <= r[2] + STITCH && y >= r[1] - STITCH && y <= r[3] + STITCH;
 }
@@ -25,6 +26,7 @@ export class Ship {
     this.roomById = Object.fromEntries(ROOMS.map((r) => [r.id, r]));
     this.doors = this.data.doors.map((d) => ({ ...d, closedUntil: 0 }));
     this.emergency = EMERGENCY;
+    this.corridors = CORRIDORS;
   }
 
   roomAt(x, y) {

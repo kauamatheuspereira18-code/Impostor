@@ -278,6 +278,9 @@ export class Game {
     let done = 0;
     for (const p of crew) {
       for (const key of p.tasks) {
+        // tarefas de tripulantes mortos saem da barra: no jogo, quem morreu não
+        // pode mais contribuir e a barra não pode ficar presa em 100% impossível
+        if (!p.alive) continue;
         total++;
         const task = this.tasks.find((t) => t.key === key);
         if (task?.completedBy.has(p.id)) done++;
@@ -635,11 +638,14 @@ export class Game {
 
   scheduleBotVotes() {
     if (this.voteTimer) clearTimeout(this.voteTimer);
+    const votingEndsAt = this.meeting?.votingUntil || Infinity;
     this.voteTimer = setTimeout(() => {
       if (this.state !== 'meeting' || !this.meeting) return;
       for (const p of [...this.players.values()]) {
         if (!p.isBot || !p.alive) continue;
-        const delay = rand(1200, 6000);
+        // vota cedo o suficiente para contar: nunca depois do fim da votação
+        const latest = Math.max(500, votingEndsAt - Date.now() - 3000);
+        const delay = Math.min(rand(1200, 6000), latest);
         setTimeout(() => {
           if (this.state !== 'meeting' || p.voted) return;
           this.vote(p.id, this.botVoteChoice(p));
@@ -839,8 +845,15 @@ export class Game {
       const d = dist(p, goal);
       const speed = GAME_CONSTANTS.BASE_SPEED * this.settings.playerSpeed * 1.05;
 
+      // rede de segurança: objetivo inalcançável por muito tempo -> troca de plano
+      if (!bs.goalSince || bs.goalSince !== bs.goal) { bs.goalSince = bs.goal; bs.goalAt = now; }
+      if (now - (bs.goalAt || now) > 25000 && d > 1.5) {
+        bs.goal = null; bs.path = null; bs.goalAt = now; bs.stuck = 0;
+        continue;
+      }
+
       // marca quando o bot chegou ao console para esperar o tempo da tarefa
-      if (goal.type === 'task' && !bs.taskUntil && d < 0.75) bs.taskUntil = now + rand(1500, 4000);
+      if (goal.type === 'task' && !bs.taskUntil && d < 0.75) bs.taskUntil = now + rand(900, 2200);
 
       const arriveDist = goal.type === 'kill' ? 0.35 : 0.55;
       if (d > arriveDist) {
@@ -886,7 +899,7 @@ export class Game {
         const task = this.tasks.find((t) => t.key === goal.taskKey);
         if (task) {
           // "executa" a tarefa por alguns segundos, como um humano faria
-          if (!bs.taskUntil) bs.taskUntil = now + rand(1200, 3200);
+          if (!bs.taskUntil) bs.taskUntil = now + rand(900, 2200);
           if (now >= bs.taskUntil) {
             const total = this.taskSteps(task);
             for (let i = 0; i < total; i++) this.advanceTask(p.id, task.key, { consoleId: goal.consoleId, data: 'bot' });
@@ -1082,7 +1095,7 @@ export class Game {
         spaces: this.ship.rooms.map((r) => ({
           id: r.id, name: r.name, parts: r.parts, props: r.props || [], radius: r.radius,
         })),
-        corridors: this.ship.mapId === 'skeld' ? undefined : [],
+        corridors: this.ship.corridors.map((c) => ({ id: c.id, parts: c.parts })),
         vents: isImp || this.state === 'ended' ? this.ship.data.vents : [],
         doors: this.ship.serializedDoors(),
         emergency: this.ship.emergency,

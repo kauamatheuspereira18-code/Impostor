@@ -40,7 +40,7 @@ em outro computador na mesma rede.
 | **Reunião** | Discussão + votação (tempos configuráveis, padrão 15s/120s), chat e votos anônimos. O mais votado é ejetado; empate não ejeta ninguém. |
 | **Emergência** | Botão na Cafeteria, 1 vez por partida (configurável). |
 | **Bots** | Preenchem a sala, fazem tarefas, matam, reportam, consertam sabotagem e votam. |
-| **Mapa** | Mini-mapa + mapa completo no canvas, com escuridão quando as luzes são cortadas. |
+| **Mapa** | Skeld com as 14 salas e 21 corredores (geometria derivada das posições oficiais dos consoles), névoa de visão como no jogo, mini-mapa e escuridão quando as luzes são cortadas. |
 | **Fantasmas** | Jogadores mortos continuam vendo o mapa e a votação (não podem votar). |
 | **Controles** | **WASD** ou **setas** para andar; **E** para usar o console/objeto mais próximo (tarefa, botão de emergência, duto, reportar corpo); **Q** para matar (impostor); **R** para sabotar; **V** para entrar/sair do duto; **Enter** para abrir o chat da reunião. No celular: arraste o dedo para andar e use os botões na tela. |
 
@@ -48,11 +48,14 @@ em outro computador na mesma rede.
 
 ```bash
 cd play
+node tools/validate-map.mjs     # geometria: 14 salas, 26 consoles, 14 dutos, 13 portas
 node tests/new_game.test.mjs    # API do socket, tarefas, sabotagem e reunião
-node tests/crewwin.test.mjs    # vitória dos tripulantes por tarefas
-node tests/fullgame2.test.mjs  # partida completa só com bots (até 150s)
-node tools/validate-map.mjs    # geometria: salas, consoles, dutos, portas
+node tests/crewwin.test.mjs     # regra de vitória dos tripulantes
+node tests/taskwin.test.mjs     # tripulantes vencem completando todas as tarefas
+node tests/fullgame2.test.mjs   # partida completa só com bots (até 240s)
 ```
+
+Todos precisam terminar com `fails = 0`, `MAPA OK` ou um vencedor.
 
 ## Configuração
 

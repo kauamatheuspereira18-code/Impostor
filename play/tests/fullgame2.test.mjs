@@ -53,6 +53,8 @@ if (st) {
   console.log('tarefas do host:', st.you.role, '|', (st.you.tasks || []).map((t) => `${t.name}:${t.done ? 'ok' : 'pend'}`).join(' | '));
   console.log('sabotagem:', JSON.stringify(st.sabotage));
   console.log('posições:', st.players.map((p) => `${p.name}${p.alive ? '' : '(x)'}@${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' '));
+  console.log('tarefas (barra):', JSON.stringify(st.taskBar), '| total no navio:', st.taskTotal ?? '?');
+  console.log('últimos eventos:', (st.log || []).slice(-8).map((l) => l.text).join(' | '));
 }
 s.close();
 process.exit(1);
