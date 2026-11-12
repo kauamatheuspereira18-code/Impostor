@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Impostor Play — Among Us</title>
+<link rel="stylesheet" href="/style.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23C51111'/><ellipse cx='16' cy='14' rx='9' ry='7' fill='%238fd4ea'/></svg>" />
+</head>
+<body>
+<div id="app">
+  <!-- MENU -->
+  <section id="menu" class="screen active">
+    <div class="menu-card">
+      <div class="logo">
+        <span class="logo-impostor">IMPOSTOR</span>
+        <span class="logo-play">PLAY</span>
+      </div>
+      <p class="tagline">O servidor privado do Among Us — agora jogável no navegador.</p>
+
+      <label class="field">
+        <span>Seu nome</span>
+        <input id="nameInput" maxlength="14" placeholder="Tripulante" value="Tripulante" />
+      </label>
+
+      <div class="field">
+        <span>Cor</span>
+        <div id="colorPicker" class="color-picker"></div>
+      </div>
+
+      <button id="quickBtn" class="btn primary big">Jogar sozinho com bots</button>
+
+      <div class="row">
+        <button id="createBtn" class="btn">Criar sala</button>
+        <div class="join-wrap">
+          <input id="codeInput" maxlength="5" placeholder="CÓDIGO" />
+          <button id="joinBtn" class="btn">Entrar</button>
+        </div>
+      </div>
+
+      <p id="menuError" class="error"></p>
+      <button id="helpMenuBtn" class="mini" style="margin-top:4px">Como jogar</button>
+      <p class="hint">Dica: abra esta página em outra aba para jogar com um amigo (mesmo código de sala).</p>
+    </div>
+  </section>
+
+  <!-- LOBBY -->
+  <section id="lobby" class="screen">
+    <header class="topbar">
+      <div class="brand">IMPOSTOR<span>PLAY</span></div>
+      <div class="code-chip">Sala <b id="lobbyCode">-----</b> <button id="copyCode" class="mini">copiar</button></div>
+      <button id="leaveBtn" class="mini danger">sair</button>
+    </header>
+
+    <div class="lobby-grid">
+      <div class="card players-card">
+        <h3>Jogadores</h3>
+        <ul id="playerList" class="player-list"></ul>
+      </div>
+
+      <div class="card settings-card">
+        <h3>Configurações</h3>
+        <div class="setting">
+          <label>Jogadores na partida <b id="valPlayers">8</b></label>
+          <input id="setPlayers" type="range" min="4" max="15" value="8" />
+        </div>
+        <div class="setting">
+          <label>Impostores <b id="valImpostors">1</b></label>
+          <input id="setImpostors" type="range" min="1" max="3" value="1" />
+        </div>
+        <div class="setting">
+          <label>Tarefas por tripulante <b id="valTasks">4</b></label>
+          <input id="setTasks" type="range" min="1" max="9" value="4" />
+        </div>
+        <label class="check">
+          <input id="setMeeting" type="checkbox" checked />
+          <span>Permitir botão de emergência</span>
+        </label>
+        <p class="host-only hint">Apenas o host edita as configurações.</p>
+        <div class="row">
+          <button id="botsBtn" class="btn ghost">+ Preencher com bots</button>
+          <button id="startBtn" class="btn primary">Iniciar partida</button>
+        </div>
+      </div>
+    </div>
+    <p class="hint center">Compartilhe o código da sala com seus amigos. Cada jogador abre o jogo no próprio celular/PC.</p>
+  </section>
+
+  <!-- GAME -->
+  <section id="game" class="screen">
+    <canvas id="canvas"></canvas>
+
+    <div id="hud" class="hud">
+      <div class="hud-left">
+        <div id="roleBadge" class="role-badge">TRIPULANTE</div>
+        <div id="taskPanel" class="panel">
+          <h4>Minhas tarefas</h4>
+          <ul id="taskList" class="task-list"></ul>
+        </div>
+      </div>
+
+      <div class="hud-right">
+        <div id="mapPanel" class="panel minimap">
+          <canvas id="minimap"></canvas>
+        </div>
+        <div id="sabotagePanel" class="panel sabotage hidden">
+          <h4 id="sabotageTitle">SABOTAGEM</h4>
+          <div id="sabotageTimer" class="sab-timer"></div>
+          <button id="fixBtn" class="btn small danger">Consertar aqui</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="actionBar" class="action-bar"></div>
+    <button id="helpBtn" class="help-btn" title="Como jogar">?</button>
+    <div id="eventFeed" class="event-feed"></div>
+
+    <div id="toast" class="toast"></div>
+
+    <!-- Minigame modal -->
+    <div id="modal" class="modal hidden">
+      <div class="modal-box">
+        <h3 id="modalTitle">Tarefa</h3>
+        <p id="modalDesc" class="hint"></p>
+        <div id="modalBody" class="modal-body"></div>
+        <div class="row end">
+          <button id="modalCancel" class="btn ghost small">Fechar</button>
+          <button id="modalOk" class="btn primary small" disabled>Concluir</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ajuda -->
+    <div id="helpModal" class="modal hidden">
+      <div class="modal-box">
+        <h3>Como jogar</h3>
+        <div class="help-list">
+          <p><b>Mover:</b> WASD / setas ou arraste o dedo na tela.</p>
+          <p><b>Tripulante:</b> cumpra as tarefas (marcadores <b style="color:#ffd640">!</b> no mapa). Quando a barra de tarefas encher, vocês vencem.</p>
+          <p><b>Impostor:</b> mate tripulantes, entre nos dutos e use sabotagens. Não deixe ser descoberto.</p>
+          <p><b>Corpo:</b> quem encontrar um corpo pode <b>reportar</b> e abrir a reunião.</p>
+          <p><b>Cafeteria:</b> botão de emergência para convocar reunião (1x por partida).</p>
+          <p><b>Reunião:</b> discuta no chat e vote. O mais votado é ejetado.</p>
+          <p><b>Sabotagem:</b> luzes, reator e comunicação. Tripulantes precisam ir até a sala e consertar — se o reator zerar, os impostores vencem.</p>
+        </div>
+        <div class="row end"><button id="helpClose" class="btn primary small">Entendi</button></div>
+      </div>
+    </div>
+
+    <!-- Meeting overlay -->
+    <div id="meeting" class="modal hidden">
+      <div class="modal-box meeting-box">
+        <h3 id="meetingTitle">Reunião</h3>
+        <div id="meetingTimer" class="meeting-timer">30</div>
+        <p id="meetingSub" class="hint"></p>
+        <ul id="voteList" class="vote-list"></ul>
+        <div id="chatLog" class="chat-log"></div>
+        <div class="chat-row">
+          <input id="chatInput" maxlength="140" placeholder="Falar no chat..." />
+          <button id="chatSend" class="btn small">Enviar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- End overlay -->
+    <div id="endScreen" class="modal hidden">
+      <div class="modal-box end-box">
+        <h2 id="endTitle">Fim</h2>
+        <p id="endSub"></p>
+        <button id="endLobby" class="btn primary">Voltar ao lobby</button>
+      </div>
+    </div>
+  </section>
+</div>
+<script src="/socket.io/socket.io.js"></script>
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>

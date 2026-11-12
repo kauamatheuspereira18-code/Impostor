@@ -1,0 +1,19 @@
+{
+  "name": "impostor-play",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Versao jogavel no navegador do Impostor (servidor privado de Among Us)",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node --watch server/server.js",
+    "test": "node tests/smoke.test.mjs",
+    "test:edge": "node tests/edge.test.mjs",
+    "test:full": "node tests/fullgame.test.mjs"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.4"
+  }
+}

@@ -40,3 +40,18 @@ This software is distributed under the **GNU GPLv3** License.
 ## Credits
 
 - [willardf/Hazel-Networking](https://github.com/willardf/Hazel-Networking)
+
+## Jogar no navegador
+
+Além do servidor para o jogo oficial, o repositório tem a versão jogável no navegador
+(`play/`): o mesmo jogo do Impostor — tripulantes, impostor, tarefas, sabotagem e reuniões —
+rodando em Node.js, sem precisar instalar o Among Us.
+
+```bash
+cd play
+npm install
+npm start
+# abra http://localhost:3000
+```
+
+Veja [play/README.md](play/README.md) para detalhes.
