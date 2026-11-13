@@ -390,5 +390,32 @@ console.log('[16] configurações de papéis');
   check('mantém todas as chaves', Object.keys(r).length === 7, JSON.stringify(r));
 }
 
+console.log('[17] barra de tarefas com fantasmas');
+{
+  const g = newGame();
+  const crew = [...g.players.values()].filter((p) => p.role === 'crew');
+  const antes = g.currentTaskProgress();
+  check('barra começa zerada', antes.done === 0 && antes.total > 0, JSON.stringify(antes));
+
+  // fantasma pode terminar tarefas (padrão do jogo) e elas contam
+  g.settings.ghostsDoTasks = true;
+  const morto = crew[0];
+  morto.alive = false;
+  const comMorto = g.currentTaskProgress();
+  check('morte não muda o total da barra', comMorto.total === antes.total, `${antes.total} -> ${comMorto.total}`);
+  const tarefa = g.tasks.find((t) => t.key === morto.tasks[0]);
+  tarefa.completedBy.add(morto.id);
+  check('tarefa de fantasma conta no progresso', g.currentTaskProgress().done === 1);
+
+  // com a opção desligada, as tarefas do morto continuam no total (não podem ser feitas)
+  const g2 = newGame();
+  g2.settings.ghostsDoTasks = false;
+  const totalAntes = g2.currentTaskProgress().total;
+  const morto2 = [...g2.players.values()].find((p) => p.role === 'crew');
+  morto2.alive = false;
+  check('opção desligada mantém o total (sem barra "pulando")', g2.currentTaskProgress().total === totalAntes,
+    `${totalAntes} -> ${g2.currentTaskProgress().total}`);
+}
+
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTUDO OK');
 process.exit(fails ? 1 : 0);

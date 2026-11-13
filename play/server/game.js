@@ -482,9 +482,9 @@ export class Game {
     let done = 0;
     for (const p of crew) {
       for (const key of p.tasks) {
-        // como no jogo, as tarefas de quem morreu continuam na barra e podem
-        // ser concluídas pelo fantasma (quando a sala permite fantasmas em tarefas)
-        if (!p.alive && !this.settings.ghostsDoTasks) continue;
+        // como no jogo, as tarefas de quem morreu continuam na barra e podem ser
+        // concluídas pelo fantasma. Se a sala desliga "fantasmas fazem tarefas",
+        // elas continuam contando no total — só não podem mais ser feitas.
         total++;
         const task = this.tasks.find((t) => t.key === key);
         if (task?.completedBy.has(p.id)) done++;
