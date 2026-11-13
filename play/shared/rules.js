@@ -53,7 +53,15 @@ export const DEFAULT_SETTINGS = {
   rolePreset: 0,              // 0 = clássico, 1 = com papéis
   roles: {
     scientist: 0, engineer: 0, guardianAngel: 0, shapeshifter: 0,
-    noisemaker: 0, phantom: 0, tracker: 0, viper: 0,
+    noisemaker: 0, phantom: 0, tracker: 0,
+  },
+  ability: {
+    shiftDuration: 10, shiftCooldown: 25,
+    phantomDuration: 5, phantomCooldown: 30,
+    ventTime: 5, ventCooldown: 30,
+    vitalsDrain: 12, vitalsRecharge: 6,
+    trackUses: 3, trackDuration: 20, trackCooldown: 25,
+    shieldDuration: 10, shieldCooldown: 60,
   },
 };
 
@@ -101,11 +109,6 @@ export const ROLE_INFO = {
     desc: 'Fica invisível por 5s (não pode matar enquanto invisível).',
     hint: 'Desapareça para escapar de testemunhas.',
   },
-  Viper: {
-    team: 'impostor', name: 'Víbora', key: 'viper', ability: 'venom',
-    desc: 'Cospe veneno: a vítima morre alguns segundos depois.',
-    hint: 'O veneno mata longe de você. Recarga de 30s.',
-  },
 };
 
 /* Números das habilidades (como no jogo). */
@@ -116,8 +119,24 @@ export const ABILITY = {
   'Guardian Angel': { shield: 10, cooldown: 60 },
   Shapeshifter: { shift: 10, cooldown: 25 },
   Phantom: { invisibility: 5, cooldown: 30 },
-  Viper: { delay: 5, cooldown: 30, range: 3.8 },
 };
+
+/* Campos de tempo das habilidades que o host ajusta no lobby. */
+export const ABILITY_FIELDS = [
+  { key: 'shiftDuration', role: 'Shapeshifter', label: 'Duração do disfarce', min: 5, max: 30, step: 1, unit: 's' },
+  { key: 'shiftCooldown', role: 'Shapeshifter', label: 'Recarga do disfarce', min: 10, max: 60, step: 1, unit: 's' },
+  { key: 'phantomDuration', role: 'Phantom', label: 'Tempo invisível', min: 3, max: 15, step: 1, unit: 's' },
+  { key: 'phantomCooldown', role: 'Phantom', label: 'Recarga da invisibilidade', min: 10, max: 60, step: 1, unit: 's' },
+  { key: 'ventTime', role: 'Engineer', label: 'Tempo no duto', min: 2, max: 15, step: 1, unit: 's' },
+  { key: 'ventCooldown', role: 'Engineer', label: 'Recarga do duto', min: 10, max: 60, step: 1, unit: 's' },
+  { key: 'vitalsDrain', role: 'Scientist', label: 'Consumo de bateria', min: 4, max: 30, step: 1, unit: '%/s' },
+  { key: 'vitalsRecharge', role: 'Scientist', label: 'Recarga de bateria', min: 2, max: 20, step: 1, unit: '%/s' },
+  { key: 'trackUses', role: 'Tracker', label: 'Marcações', min: 1, max: 5, step: 1, unit: '' },
+  { key: 'trackDuration', role: 'Tracker', label: 'Duração da marca', min: 5, max: 60, step: 5, unit: 's' },
+  { key: 'trackCooldown', role: 'Tracker', label: 'Recarga da marcação', min: 10, max: 60, step: 1, unit: 's' },
+  { key: 'shieldDuration', role: 'Guardian Angel', label: 'Duração do escudo', min: 5, max: 30, step: 1, unit: 's' },
+  { key: 'shieldCooldown', role: 'Guardian Angel', label: 'Recarga do escudo', min: 20, max: 120, step: 5, unit: 's' },
+];
 
 /* Presets de regras do jogo original (RulesPresets.json). */
 export const RULE_PRESETS = {
@@ -139,7 +158,7 @@ export const RULE_PRESETS = {
       numImpostors: 2, discussionTime: 15, votingTime: 120, killCooldown: 25,
       playerSpeed: 0.85, crewVision: 1.0, impostorVision: 1.75,
       numCommonTasks: 1, numLongTasks: 1, numShortTasks: 2, emergencyMeetings: 1,
-      roles: { scientist: 1, engineer: 1, guardianAngel: 1, shapeshifter: 1, noisemaker: 1, phantom: 0, tracker: 1, viper: 0 },
+      roles: { scientist: 1, engineer: 1, guardianAngel: 1, shapeshifter: 1, noisemaker: 1, phantom: 0, tracker: 1 },
     },
   },
   chaos: {

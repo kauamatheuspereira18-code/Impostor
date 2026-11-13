@@ -130,43 +130,43 @@ io.on('connection', (socket) => {
     taskTypes: TASK_TYPES,
   });
 
-  const joinRoom = (game, name, color) => {
+  const joinRoom = (game, name, color, cosmetics = {}) => {
     socketGame.set(socket.id, game.code);
     socket.join(game.code);
-    const player = game.addPlayer(socket.id, name, color);
+    const player = game.addPlayer(socket.id, name, color, false, cosmetics);
     broadcast(game);
     return player;
   };
 
-  socket.on('create', ({ name, color, isPublic = true } = {}, cb) => {
+  socket.on('create', ({ name, color, isPublic = true, hat, pet } = {}, cb) => {
     const game = createGame();
     game.isPublic = isPublic !== false;
-    const p = joinRoom(game, name, color);
+    const p = joinRoom(game, name, color, { hat, pet });
     p.session = randomUUID();
     reply(cb, { ok: true, code: game.code, id: socket.id, color: p.color, session: p.session });
   });
 
-  socket.on('join', ({ code, name, color } = {}, cb) => {
+  socket.on('join', ({ code, name, color, hat, pet } = {}, cb) => {
     const game = games.get(String(code || '').toUpperCase().trim());
     if (!game) return reply(cb, { error: 'Sala não encontrada.' });
     if (game.state !== 'lobby') return reply(cb, { error: 'Partida em andamento.' });
     if (game.players.size >= game.settings.maxPlayers) return reply(cb, { error: 'Sala cheia.' });
-    const p = joinRoom(game, name, color);
+    const p = joinRoom(game, name, color, { hat, pet });
     p.session = randomUUID();
     reply(cb, { ok: true, code: game.code, id: socket.id, color: p.color, session: p.session });
   });
 
-  socket.on('quickplay', ({ name, color, bots = 9 } = {}, cb) => {
+  socket.on('quickplay', ({ name, color, bots = 9, hat, pet } = {}, cb) => {
     const open = [...games.values()].find((g) =>
       g.state === 'lobby' && g.connectedHumans > 0 && g.players.size < g.settings.maxPlayers);
     if (open) {
-      const p = joinRoom(open, name, color);
+      const p = joinRoom(open, name, color, { hat, pet });
       p.session = randomUUID();
       reply(cb, { ok: true, code: open.code, id: socket.id, color: p.color, session: p.session, joined: true });
       return;
     }
     const game = createGame();
-    const p = joinRoom(game, name, color);
+    const p = joinRoom(game, name, color, { hat, pet });
     p.session = randomUUID();
     game.setSettings({ maxPlayers: Math.max(6, Math.min(10, bots + 1)) });
     game.fillBots();
@@ -176,16 +176,27 @@ io.on('connection', (socket) => {
   /* lista de salas pela socket (tempo real) */
   socket.on('listGames', (data, cb) => reply(ackArg(data, cb), { ok: true, games: publicGames() }));
 
-  socket.on('solo', ({ name, color } = {}, cb) => {
+  socket.on('solo', ({ name, color, hat, pet } = {}, cb) => {
     // salinha só sua com bots, começa já
     const game = createGame();
     game.isPublic = false;
-    const p = joinRoom(game, name, color);
+    const p = joinRoom(game, name, color, { hat, pet });
     game.setSettings({ maxPlayers: 10, numImpostors: 2 });
     game.fillBots();
     p.session = randomUUID();
     game.startGame();
     reply(cb, { ok: true, code: game.code, id: socket.id, color: p.color, session: p.session });
+  });
+
+  socket.on('cosmetics', ({ hat, pet } = {}, cb) => {
+    const game = getGame(socket.id);
+    if (!game) return reply(cb, { error: 'Sem sala.' });
+    const p = game.players.get(socket.id);
+    if (!p) return reply(cb, { error: 'Sem jogador.' });
+    if (Number.isFinite(+hat)) p.hat = Math.max(0, Math.min(11, Math.round(+hat)));
+    if (Number.isFinite(+pet)) p.pet = Math.max(0, Math.min(4, Math.round(+pet)));
+    broadcast(game);
+    reply(cb, { ok: true, hat: p.hat, pet: p.pet });
   });
 
   socket.on('setSettings', ({ patch, preset, applyToBots } = {}, cb) => {

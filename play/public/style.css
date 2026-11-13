@@ -904,7 +904,6 @@ html, body {
 .role-card[data-team='crew'] .role-name { color: #9ae6ff; }
 .role-card[data-role='Shapeshifter'] .role-name { color: #cda2ff; }
 .role-card[data-role='Phantom'] .role-name { color: #a9c2ff; }
-.role-card[data-role='Viper'] .role-name { color: #86f58d; }
 
 /* papéis na sala de espera */
 .role-head-row { border-top: 1px solid rgba(150, 190, 240, 0.16); padding-top: 12px; }
@@ -1031,3 +1030,20 @@ body.sab-critical #screen-game::after {
   35% { opacity: 1; transform: scale(1.1); }
   100% { opacity: 0; transform: scale(1.35) translateY(-18px); }
 }
+
+/* cosméticos na tela inicial */
+.home-cos-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 10px;
+}
+.cos-select {
+  flex: 1 1 140px; min-width: 120px;
+  background: rgba(10, 18, 28, 0.9);
+  color: #e8f2ff; border: 1px solid rgba(150, 190, 240, 0.25);
+  border-radius: 10px; padding: 7px 9px; font: inherit; font-size: 13px;
+}
+.cos-select:focus { outline: none; border-color: rgba(140, 210, 255, 0.7); }
+
+/* tempos das habilidades no lobby */
+.ability-row b { color: #9ae6ff; }
+.ability-row[data-team='impostor'] b { color: #ff9aa4; }

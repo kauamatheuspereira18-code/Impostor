@@ -3,7 +3,7 @@ import { GAME_CONSTANTS } from '/shared/rules.js';
 import { COLORS } from '/shared/mapdata.js';
 import {
   drawSpace, drawCrew, drawCorpse, drawVent, drawDoor,
-  drawEmergencyButton, drawMeetingTable, shade,
+  drawEmergencyButton, drawMeetingTable, drawPet, shade,
 } from './art.js';
 
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -143,7 +143,6 @@ export class Renderer {
       if (p.hidden && p.id !== me?.id) continue;
       this.drawPlayer(p, p.id === me?.id, state);
       if (p.shielded) this.drawShield(p);
-      if (p.poisoned && p.id !== me?.id) this.drawPoison(p);
     }
     for (const p of players) {
       if (p.alive) continue;
@@ -556,7 +555,21 @@ export class Renderer {
       ghost,
       alpha: ghost ? 0.55 : (p.hidden ? 0.42 : 1),
       highlight: false,
+      hat: p.hat || 0,
     });
+
+    // pet flutuando ao lado (como no jogo)
+    if (p.pet && !ghost) {
+      drawPet(ctx, {
+        id: p.pet,
+        x: s.x - sm.facing * h * 0.62,
+        y: s.y + h * 0.18,
+        h,
+        color: col.hex,
+        t: this.time,
+        facing: sm.facing,
+      });
+    }
 
     // brilho de metamorfose (quem está transformado)
     if (p.shifted) this.drawShiftShimmer(s.x, s.y, h);
@@ -699,31 +712,6 @@ export class Renderer {
       ctx.closePath();
       ctx.fill();
     }
-    ctx.restore();
-  }
-
-  /** Veneno da Víbora: fumaça verde subindo do alvo. */
-  drawPoison(p) {
-    const { ctx } = this;
-    const sm = this.smoothFor(p);
-    const s = this.worldToScreen(sm.x, sm.y);
-    const h = this.zoom * 0.9;
-    ctx.save();
-    for (let i = 0; i < 5; i++) {
-      const t = (this.time * 0.7 + i / 5) % 1;
-      const a = 0.22 * (1 - t);
-      ctx.globalAlpha = a;
-      ctx.fillStyle = '#6ef07a';
-      ctx.beginPath();
-      ctx.arc(s.x + Math.sin((t + i) * 7) * h * 0.22, s.y - t * h * 0.85, h * 0.07 * (1 - t * 0.5), 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.globalAlpha = 0.5 + 0.2 * Math.sin(this.time * 5);
-    ctx.strokeStyle = '#8dff7a';
-    ctx.lineWidth = Math.max(1, this.zoom * 0.03);
-    ctx.beginPath();
-    ctx.arc(s.x, s.y + h * 0.1, h * 0.42, 0, Math.PI * 2);
-    ctx.stroke();
     ctx.restore();
   }
 

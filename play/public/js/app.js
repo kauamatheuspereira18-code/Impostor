@@ -1,5 +1,6 @@
-import { GAME_CONSTANTS, RULE_PRESETS, SABOTAGE_INFO, MAP_SABOTAGES, ROLE_INFO } from '/shared/rules.js';
+import { GAME_CONSTANTS, RULE_PRESETS, SABOTAGE_INFO, MAP_SABOTAGES, ROLE_INFO, ABILITY_FIELDS } from '/shared/rules.js';
 import { Renderer } from './renderer.js';
+import { HATS, PETS } from './art.js';
 import { TASK_GAMES } from './tasks.js';
 import { sfx } from './sfx.js';
 
@@ -9,7 +10,6 @@ const $ = (id) => document.getElementById(id);
 const ABILITY_UI = {
   Shapeshifter: { label: 'Transformar', ico: '◐', target: true, hint: 'Escolha quem você vai imitar por 10s.' },
   Phantom: { label: 'Invisível', ico: '◌', target: false, hint: 'Fique invisível por 5s.' },
-  Viper: { label: 'Veneno', ico: '☣', target: true, hint: 'Escolha quem vai morrer envenenado.' },
   Tracker: { label: 'Rastrear', ico: '◎', target: true, hint: 'Marque um jogador e veja a posição dele.' },
   'Guardian Angel': { label: 'Proteger', ico: '✚', target: true, hint: 'Dê um escudo a um jogador vivo.' },
   Scientist: { label: 'Vitais', ico: '♥', target: false, hint: 'Abra os vitais gastando bateria.' },
@@ -18,7 +18,7 @@ const socket = io({ transports: ['websocket', 'polling'] });
 
 /** estado global do cliente */
 const C = {
-  me: { name: 'Tripulante', color: 0 },
+  me: { name: 'Tripulante', color: 0, hat: 0, pet: 0 },
   state: null,
   code: null,
   keys: new Set(),
@@ -98,10 +98,28 @@ socket.on('hello', (info) => {
   if (typeof saved.color === 'number') C.me.color = saved.color;
   $('dataVersion').textContent = `dados do jogo ${info.gameDataVersion}`;
   buildColorGrid();
+  buildCosmeticSelects();
   buildPresets();
 });
 
 socket.on('toast', (msg) => toast(msg));
+
+function buildCosmeticSelects() {
+  const hat = $('hatSelect');
+  const pet = $('petSelect');
+  hat.innerHTML = HATS.map((n, i) => `<option value="${i}">${escapeHtml(n)}</option>`).join('');
+  pet.innerHTML = PETS.map((n, i) => `<option value="${i}">${escapeHtml(n)}</option>`).join('');
+  hat.value = String(C.me.hat);
+  pet.value = String(C.me.pet);
+  const send = () => {
+    C.me.hat = +hat.value;
+    C.me.pet = +pet.value;
+    if (C.state?.state === 'lobby') socket.emit('cosmetics', { hat: C.me.hat, pet: C.me.pet });
+    sfx.click();
+  };
+  hat.addEventListener('change', send);
+  pet.addEventListener('change', send);
+}
 
 function buildColorGrid() {
   const grid = $('colorGrid');
@@ -165,7 +183,7 @@ function renderGameList(games) {
     btn?.addEventListener('click', () => {
       C.me.name = nameValue();
       sfx.init();
-      socket.emit('join', { code: g.code, name: C.me.name, color: C.me.color }, (res) => {
+      socket.emit('join', { code: g.code, name: C.me.name, color: C.me.color, hat: C.me.hat, pet: C.me.pet }, (res) => {
         if (res?.error) return showHomeError(res.error);
         onJoined(res);
       });
@@ -197,7 +215,7 @@ function nameValue() {
 
 $('btnSolo').addEventListener('click', () => {
   C.me.name = nameValue();
-  socket.emit('solo', { name: C.me.name, color: C.me.color }, (res) => {
+  socket.emit('solo', { name: C.me.name, color: C.me.color, hat: C.me.hat, pet: C.me.pet }, (res) => {
     if (res?.error) return showHomeError(res.error);
     onJoined(res);
   });
@@ -205,7 +223,7 @@ $('btnSolo').addEventListener('click', () => {
 
 $('btnCreate').addEventListener('click', () => {
   C.me.name = nameValue();
-  socket.emit('create', { name: C.me.name, color: C.me.color }, (res) => {
+  socket.emit('create', { name: C.me.name, color: C.me.color, hat: C.me.hat, pet: C.me.pet }, (res) => {
     if (res?.error) return showHomeError(res.error);
     onJoined(res);
   });
@@ -215,7 +233,7 @@ $('btnJoin').addEventListener('click', () => {
   C.me.name = nameValue();
   const code = $('codeInput').value.trim().toUpperCase();
   if (code.length < 3) return showHomeError('Digite o código da sala.');
-  socket.emit('join', { code, name: C.me.name, color: C.me.color }, (res) => {
+  socket.emit('join', { code, name: C.me.name, color: C.me.color, hat: C.me.hat, pet: C.me.pet }, (res) => {
     if (res?.error) return showHomeError(res.error);
     onJoined(res);
   });
@@ -449,7 +467,6 @@ const SETTINGS_DEFS = [
 const ROLE_DEFS = [
   { key: 'shapeshifter', role: 'Shapeshifter' },
   { key: 'phantom', role: 'Phantom' },
-  { key: 'viper', role: 'Viper' },
   { key: 'engineer', role: 'Engineer' },
   { key: 'scientist', role: 'Scientist' },
   { key: 'noisemaker', role: 'Noisemaker' },
@@ -519,6 +536,33 @@ function buildSettings(state, isHost) {
     });
     input.addEventListener('change', () => {
       emit('setSettings', { patch: { roles: { ...(C.state?.settings?.roles || {}), [def.key]: +input.value } } });
+    });
+    list.append(row);
+  }
+
+  // ---------------- tempos das habilidades ----------------
+  const ab = state.settings.ability || {};
+  const abHead = el('div', 'setting-row role-head-row');
+  abHead.innerHTML = '<div class="setting-head"><span>Tempos das habilidades</span><b>o host ajusta</b></div>';
+  list.append(abHead);
+
+  for (const f of ABILITY_FIELDS) {
+    const info = ROLE_INFO[f.role];
+    const value = ab[f.key] ?? f.min;
+    const row = el('div', 'setting-row ability-row');
+    row.dataset.team = info?.team || 'crew';
+    row.innerHTML = `
+      <div class="setting-head">
+        <span>${escapeHtml(info?.name || f.role)}: ${escapeHtml(f.label)}</span>
+        <b>${value}${f.unit}</b>
+      </div>
+      <input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${value}" ${isHost ? '' : 'disabled'} />`;
+    const input = row.querySelector('input');
+    input.addEventListener('input', () => { row.querySelector('b').textContent = `${input.value}${f.unit}`; });
+    input.addEventListener('change', () => {
+      emit('setSettings', {
+        patch: { ability: { ...(C.state?.settings?.ability || {}), [f.key]: +input.value } },
+      });
     });
     list.append(row);
   }
@@ -1193,7 +1237,10 @@ function updateCooldowns() {
   const chips = [];
   if (left <= 0 && st.you.role === 'impostor' && st.you.alive) chips.push('Matar pronto');
   if ((st.you.phantomUntil || 0) > Date.now()) chips.push(`Invisível ${Math.ceil((st.you.phantomUntil - Date.now()) / 1000)}s`);
-  if ((st.you.shiftUntil || 0) > Date.now()) chips.push(`Transformado ${Math.ceil((st.you.shiftUntil - Date.now()) / 1000)}s`);
+  if ((st.you.shiftUntil || 0) > Date.now()) {
+    const quem = st.you.shiftName ? ` em ${st.you.shiftName}` : '';
+    chips.push(`Transformado${quem} ${Math.ceil((st.you.shiftUntil - Date.now()) / 1000)}s`);
+  }
   if ((st.you.shieldUntil || 0) > Date.now()) chips.push(`Escudo ${Math.ceil((st.you.shieldUntil - Date.now()) / 1000)}s`);
   if (st.you.roleType === 'Scientist') chips.push(`Bateria ${st.you.battery ?? 100}%`);
   if (st.you.roleType === 'Tracker' && st.you.alive) chips.push(`Marcações ${st.you.trackerUses ?? 0}`);
@@ -1314,7 +1361,6 @@ function emitAbility(targetId) {
   socket.emit('ability', { type: you.roleType, targetId: targetId || null }, (res) => {
     if (res?.error) return toast(res.error);
     if (you.roleType === 'Scientist') openSpecial('MedBay');
-    else if (you.roleType === 'Viper') toast('Veneno aplicado — a vítima cai em instantes.');
     else if (you.roleType === 'Phantom') toast('Você ficou invisível.');
     else if (you.roleType === 'Shapeshifter') toast('Transformação ativa.');
     sfx.click();

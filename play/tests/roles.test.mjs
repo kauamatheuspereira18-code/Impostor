@@ -11,7 +11,7 @@ const newGame = () => {
   g.addPlayer('h', 'Humano', 0, false);
   for (let i = 1; i < 10; i++) g.addPlayer('b' + i, 'Bot' + i, i, true);
   g.settings.roles = {
-    shapeshifter: 1, phantom: 1, viper: 1,
+    shapeshifter: 1, phantom: 1,
     engineer: 1, scientist: 1, noisemaker: 1, tracker: 1, guardianAngel: 1,
   };
   g.settings.numImpostors = 3;
@@ -34,14 +34,15 @@ console.log('[1] distribuição de papéis');
 {
   const g = newGame();
   const specials = [...g.players.values()].filter((p) => p.roleType !== 'Impostor' && p.roleType !== 'Crewmate');
-  check('8 papéis sorteados', specials.length === 8, `n=${specials.length}`);
+  check('7 papéis sorteados (2 de impostor + 5 de tripulante)', specials.length === 7, `n=${specials.length}`);
   const imps = [...g.players.values()].filter((p) => p.role === 'impostor');
-  check('impostores com papel de impostor', imps.every((p) => ['Impostor', 'Shapeshifter', 'Phantom', 'Viper'].includes(p.roleType)));
+  check('impostores com papel de impostor', imps.every((p) => ['Impostor', 'Shapeshifter', 'Phantom'].includes(p.roleType)));
   const crew = [...g.players.values()].filter((p) => p.role === 'crew');
-  check('tripulantes só com papéis de tripulante', crew.every((p) => !['Shapeshifter', 'Phantom', 'Viper'].includes(p.roleType)));
+  check('tripulantes só com papéis de tripulante', crew.every((p) => !['Shapeshifter', 'Phantom'].includes(p.roleType)));
   const human = g.players.get('h');
   check('humano recebeu papel', human.roleType !== 'Impostor' && human.roleType !== 'Crewmate', human.roleType);
-  check('ROLE_INFO tem os 3 papéis de impostor', ['Shapeshifter', 'Phantom', 'Viper'].every((k) => ROLE_INFO[k]?.team === 'impostor'));
+  check('ROLE_INFO tem os 2 papéis de impostor', ['Shapeshifter', 'Phantom'].every((k) => ROLE_INFO[k]?.team === 'impostor'));
+  check('Víbora não existe (não é papel oficial)', !ROLE_INFO.Viper);
   check('ROLE_INFO tem os 5 papéis de tripulante', ['Engineer', 'Scientist', 'Noisemaker', 'Tracker', 'Guardian Angel'].every((k) => ROLE_INFO[k]?.team === 'crew'));
 }
 
@@ -59,11 +60,26 @@ console.log('[2] metamorfo');
   check('outros veem a cor do alvo', seen.color === other.color);
   check('marca de transformado', seen.shifted === true);
   const self = g.serialize('h');
-  check('eu me vejo como eu mesmo', self.players.find((p) => p.id === 'h').name === 'Humano');
+  const selfSeen = self.players.find((p) => p.id === 'h');
+  check('eu também me vejo transformado', selfSeen.name === other.name, `${selfSeen.name} != ${other.name}`);
+  check('meu nome real fica guardado', selfSeen.realName === 'Humano', selfSeen.realName);
   check('cooldown aplicado', shifter.abilityReadyAt > Date.now(), `em ${shifter.abilityReadyAt - Date.now()}ms`);
   shifter.shiftUntil = Date.now() - 1;
   g.tickAbilities(0.05, Date.now());
   check('volta ao normal ao expirar', g.serialize('b2').players.find((p) => p.id === 'h').name === 'Humano');
+
+  // cópia perfeita: cor, chapéu e pet
+  shifter.abilityReadyAt = 0;
+  shifter.hat = 3; shifter.pet = 2;
+  other.hat = 5; other.pet = 4;
+  g.useAbility('h', 'Shapeshifter', other.id);
+  const copy = g.serialize('b3').players.find((p) => p.id === 'h');
+  check('copia o chapéu', copy.hat === other.hat, `hat=${copy.hat}`);
+  check('copia o pet', copy.pet === other.pet, `pet=${copy.pet}`);
+  check('copia a cor', copy.color === other.color);
+  const selfCopy = g.serialize('h').players.find((p) => p.id === 'h');
+  check('eu vejo o chapéu copiado', selfCopy.hat === other.hat && selfCopy.pet === other.pet);
+  check('cosméticos originais guardados', g.players.get('h').hat === 3 && g.players.get('h').pet === 2);
 }
 
 console.log('[3] fantasma (phantom)');
@@ -84,29 +100,6 @@ console.log('[3] fantasma (phantom)');
   g.tickAbilities(0.05, Date.now());
   const k2 = g.kill('h', victim.id);
   check('mata ao ficar visível', k2.ok, JSON.stringify(k2));
-}
-
-console.log('[4] víbora');
-{
-  const g = newGame();
-  const viper = g.players.get('h');
-  setRole(viper, 'Viper', 'impostor');
-  const victim = crewMember(g, 'h');
-  victim.x = viper.x + 1; victim.y = viper.y;
-  const res = g.useAbility('h', 'Viper', victim.id);
-  check('envenenou', res.ok, JSON.stringify(res));
-  check('veneno marcado', victim.poisonedUntil > Date.now());
-  victim.x = viper.x + 50; // longe não importa: veneno é global
-  g.tickAbilities(0.05, victim.poisonedUntil + 10);
-  check('vítima morreu', victim.alive === false);
-  check('corpo criado', g.bodies.some((b) => b.playerId === victim.id && b.poisoned));
-  check('crédito para a víbora', viper.kills === 1, `kills=${viper.kills}`);
-  const st = g.serialize('b4');
-  check('corpo envenenado visível', !!st.bodies.find((b) => b.playerId === victim.id && b.poisoned));
-  const far = crewMember(g, 'h');
-  far.x = viper.x + 50; far.y = viper.y;
-  viper.abilityReadyAt = 0;
-  check('alcance curto respeitado', !!g.useAbility('h', 'Viper', far.id).error);
 }
 
 console.log('[5] anjo da guarda');
@@ -218,16 +211,47 @@ console.log('[10] três impostores');
   check('vitória dos impostores com a tripulação eliminada', g.state === 'ended' && g.winner === 'impostor', `${g.state}/${g.winner} :: ${g.gameOverReason}`);
 }
 
-console.log('[11] configurações de papéis');
+console.log('[11] tempos das habilidades ajustáveis pelo host');
 {
   const g = newGame();
-  g.setSettings({ roles: { engineer: 9, viper: -3, phantom: 2.4, shapeshifter: '2' } });
+  const shifter = g.players.get('h');
+  setRole(shifter, 'Shapeshifter', 'impostor');
+  g.setSettings({ ability: { shiftDuration: 20, shiftCooldown: 40 } });
+  check('duração salva', g.settings.ability.shiftDuration === 20, String(g.settings.ability.shiftDuration));
+  const res = g.useAbility('h', 'Shapeshifter', 'b1');
+  check('habilidade aceita', res.ok, JSON.stringify(res));
+  const dur = Math.round((shifter.shiftUntil - Date.now()) / 1000);
+  const cd = Math.round((shifter.abilityReadyAt - Date.now()) / 1000);
+  check('duração aplicada (20s)', dur === 20, `${dur}s`);
+  check('recarga aplicada (40s)', cd === 40, `${cd}s`);
+
+  const eng = g.players.get('b2');
+  setRole(eng, 'Engineer', 'crew');
+  g.setSettings({ ability: { ventTime: 9, ventCooldown: 45 } });
+  const vent = moveToVent(g, eng);
+  check('engenheiro entra', g.enterVent(eng.id, vent.id).ok);
+  g.tickAbilities(0.05, eng.ventEnteredAt + 6000);
+  check('continua no duto em 6s (limite 9s)', eng.inVent === true);
+  g.tickAbilities(0.05, eng.ventEnteredAt + 9600);
+  check('sai depois de 9s', eng.inVent === false);
+  check('recarga de 45s', eng.abilityReadyAt - Date.now() > 40000, `${Math.round((eng.abilityReadyAt - Date.now()) / 1000)}s`);
+
+  g.setSettings({ ability: { trackUses: 5, shiftDuration: 999, phantomCooldown: -5 } });
+  check('limita ao máximo', g.settings.ability.shiftDuration === 30, String(g.settings.ability.shiftDuration));
+  check('limita ao mínimo', g.settings.ability.phantomCooldown === 10, String(g.settings.ability.phantomCooldown));
+  check('marcações ajustadas', g.settings.ability.trackUses === 5);
+}
+
+console.log('[12] configurações de papéis');
+{
+  const g = newGame();
+  g.setSettings({ roles: { engineer: 9, phantom: 2.4, shapeshifter: '2' } });
   const r = g.settings.roles;
   check('limita em 3', r.engineer === 3, `eng=${r.engineer}`);
-  check('nunca negativo', r.viper === 0, `viper=${r.viper}`);
+  check('nunca negativo', r.tracker === 0, `tracker=${r.tracker}`);
   check('arredonda', r.phantom === 2, `phantom=${r.phantom}`);
   check('aceita string numérica', r.shapeshifter === 2, `shifter=${r.shapeshifter}`);
-  check('mantém todas as chaves', Object.keys(r).length === 8, JSON.stringify(r));
+  check('mantém todas as chaves', Object.keys(r).length === 7, JSON.stringify(r));
 }
 
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTUDO OK');

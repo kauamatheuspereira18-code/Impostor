@@ -61,7 +61,8 @@ A partida é autoritativa no servidor, então todos veem a mesma coisa.
 | **Animação** | Caminhada com pernas alternadas, mochila, viseira com reflexo, tremor de câmera no abate, respingos, duto abrindo, portas deslizando, visão em círculo. |
 | **Geometria** | 14 salas com planta própria (octógono na Cafeteria, canto cortado em Armas, bico na Navegação, Armazém em L) e 21 corredores ligados de acordo com o mapa clássico, colisão por polígono. |
 | **Tarefas visuais** | Scan na Enfermaria, tiros de asteroide em Armas e anéis em Escudos aparecem para todos, como no jogo. |
-| **Papéis** | Até 3 impostores com Metamorfo, Fantasma e Víbora; tripulantes com Engenheiro, Cientista, Barulhento, Rastreador, Anjo da Guarda ou sem papel. Configurável de 0 a 3 de cada no lobby. |
+| **Papéis** | Até 3 impostores com Metamorfo e Fantasma; tripulantes com Engenheiro, Cientista, Barulhento, Rastreador, Anjo da Guarda ou sem papel. Configurável de 0 a 3 de cada no lobby. |
+| **Cosméticos** | 11 chapéus e 4 pets desenhados em canvas, escolhidos na tela inicial e copiados pelo Metamorfo junto com cor e nome. |
 | **Habilidades** | Botão de habilidade com recarga em anel, escolha de alvo, transformação com faíscas, invisibilidade, veneno, escudo, marcações no mapa, vitais com bateria e alarme do Barulhento. |
 | **Revelação de papel** | Cartão animado no começo de cada partida com papel, equipe, descrição e cúmplices. |
 
@@ -81,7 +82,7 @@ node tests/new_game.test.mjs     # socket: lobby, tarefas, sabotagem, reunião e
 node tests/crewwin.test.mjs      # vitória dos tripulantes
 node tests/taskwin.test.mjs      # vitória por tarefas (com fantasma terminando as dele)
 node tests/fidelity.test.mjs     # abate, tarefa de fantasma, portas, O₂, ejeção
-node tests/roles.test.mjs        # 8 papéis: metamorfo, fantasma, víbora, engenheiro, cientista, barulhento, rastreador, anjo
+node tests/roles.test.mjs        # 7 papéis + tempos ajustáveis + cópia perfeita do metamorfo
 node tests/fullgame2.test.mjs    # partida completa só com bots
 node tests/online.test.mjs       # criar/entrar/lista pública/reconexão/kick (servidor rodando)
 ```
@@ -112,11 +113,13 @@ O host liga de 0 a 3 de cada papel no lobby. Um impostor recebe no máximo um pa
 o sorteio é aleatório a cada partida e o jogador humano sempre recebe um papel quando algum
 está ligado.
 
+Os tempos de cada habilidade (duração e recarga) são ajustáveis pelo host no lobby, em
+**Tempos das habilidades** — os valores só valem para usos novos, não para o que já está ativo.
+
 | Papel | Time | O que faz |
 | --- | --- | --- |
-| Metamorfo | impostor | Assume a aparência de outro jogador por 10s (recarga 25s). |
+| Metamorfo | impostor | Vira uma cópia perfeita de outro jogador — nome, cor, chapéu e pet — por 10s (recarga 25s). Você também se vê como a cópia até acabar. |
 | Fantasma | impostor | Fica invisível por 5s (recarga 30s); não pode matar enquanto invisível. |
-| Víbora | impostor | Cospe veneno a curta distância: a vítima morre em 5s (recarga 30s). |
 | Engenheiro | tripulante | Entra nos dutos por até 5s (recarga 30s). |
 | Cientista | tripulante | Vê os vitais em qualquer lugar; a bateria cai 12/s e recarrega 6/s. |
 | Barulhento | tripulante | Ao ser morto, dispara um alarme sonoro e visual no local. |
@@ -166,8 +169,10 @@ Comparado ao cliente oficial, ainda não estão aqui:
 
 - **Outros mapas**: por escolha de escopo, o jogo fica só no **The Skeld** clássico; a
   geometria dos demais não é usada.
-- **Bots usando habilidades**: os bots recebem papéis, mas não acionam Metamorfo/Fantasma/Víbora
+- **Bots usando habilidades**: os bots recebem papéis, mas não acionam Metamorfo/Fantasma
   nem o escudo do Anjo — só matam, fazem tarefas, reportam e votam.
+- **Trajes/skins completos**: existem cor, chapéu e pet; não há o catálogo inteiro de skins,
+  visores e nameplates do jogo.
 - **Cosméticos** (chapéus, pets, skins) e progressão.
 - **Matchmaking público com contas/regiões** — hoje as salas são por código e por lista.
 - **Geometria exata do mesh original** do Unity: as plantas foram reconstruídas a partir do

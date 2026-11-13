@@ -1,5 +1,5 @@
 import { COLORS, MAPS } from '../shared/mapdata.js';
-import { GAME_CONSTANTS, DEFAULT_SETTINGS, MAP_SABOTAGES, SABOTAGE_INFO, ROLE_INFO, ABILITY } from '../shared/rules.js';
+import { GAME_CONSTANTS, DEFAULT_SETTINGS, MAP_SABOTAGES, SABOTAGE_INFO, ROLE_INFO, ABILITY, ABILITY_FIELDS } from '../shared/rules.js';
 import { makeShip } from './ship.js';
 
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -47,7 +47,7 @@ export class Game {
   }
 
   /* ============================ jogadores ============================ */
-  addPlayer(id, name, colorIndex, isBot = false) {
+  addPlayer(id, name, colorIndex, isBot = false, cosmetics = {}) {
     const usedColors = new Set([...this.players.values()].map((p) => p.color));
     let color = typeof colorIndex === 'number' && !usedColors.has(colorIndex) ? colorIndex : null;
     if (color === null) {
@@ -67,6 +67,8 @@ export class Game {
       facing: 1,
       moving: false,
       isBot,
+      hat: clamp(Math.round(Number(cosmetics.hat) || 0), 0, 11),
+      pet: clamp(Math.round(Number(cosmetics.pet) || 0), 0, 4),
       alive: true,
       connected: true,
       role: null,
@@ -160,7 +162,9 @@ export class Game {
     for (let i = 0; i < need; i++) {
       const used = new Set([...this.players.values()].map((p) => p.name));
       const name = BOT_NAMES.filter((n) => !used.has(n))[0] || BOT_NAMES[i % BOT_NAMES.length];
-      this.addPlayer('bot_' + uid(), name, null, true);
+      const hat = Math.random() < 0.55 ? 1 + Math.floor(Math.random() * 11) : 0;
+      const pet = Math.random() < 0.4 ? 1 + Math.floor(Math.random() * 4) : 0;
+      this.addPlayer('bot_' + uid(), name, null, true, { hat, pet });
     }
     this.push();
   }
@@ -200,6 +204,14 @@ export class Game {
     s.numLongTasks = clamp(Math.round(s.numLongTasks), 0, 4);
     s.numShortTasks = clamp(Math.round(s.numShortTasks), 0, 6);
     s.emergencyMeetings = clamp(Math.round(s.emergencyMeetings), 0, 9);
+    if (this.settings.ability && typeof this.settings.ability === 'object') {
+      const clean = { ...DEFAULT_SETTINGS.ability };
+      for (const f of ABILITY_FIELDS) {
+        const v = Number(this.settings.ability[f.key]);
+        if (Number.isFinite(v)) clean[f.key] = clamp(v, f.min, f.max);
+      }
+      this.settings.ability = clean;
+    }
     if (this.settings.roles && typeof this.settings.roles === 'object') {
       const clean = {};
       for (const key of Object.keys(DEFAULT_SETTINGS.roles)) {
@@ -243,10 +255,8 @@ export class Game {
       p.shiftUntil = 0;
       p.phantomUntil = 0;
       p.shieldUntil = 0;
-      p.poisonedUntil = 0;
-      p.poisonedBy = null;
       p.tracked = [];
-      p.trackerUses = ABILITY.Tracker.uses;
+      p.trackerUses = this.ability('trackUses');
       p.battery = 100;
       p.vitalsOpen = false;
       p.alive = true;
@@ -289,7 +299,7 @@ export class Game {
 
     // papéis de impostor (cada impostor recebe no máximo um)
     const impPool = [];
-    for (const [key, type] of [['shapeshifter', 'Shapeshifter'], ['phantom', 'Phantom'], ['viper', 'Viper']]) {
+    for (const [key, type] of [['shapeshifter', 'Shapeshifter'], ['phantom', 'Phantom']]) {
       const n = clamp(Math.round(wants[key] || 0), 0, 3);
       for (let i = 0; i < n; i++) impPool.push(type);
     }
@@ -327,7 +337,7 @@ export class Game {
 
     for (const p of players) {
       p.abilityReadyAt = 0;
-      p.trackerUses = ABILITY.Tracker.uses;
+      p.trackerUses = this.ability('trackUses');
       p.battery = 100;
     }
   }
@@ -338,7 +348,7 @@ export class Game {
     if (!p) return { error: 'Jogador inválido.' };
     if (this.state !== 'tasks') return { error: 'Não é possível usar agora.' };
     const now = Date.now();
-    const ability = ABILITY[p.roleType];
+    const ability = this.abilityOf(p);
     if (!ability) return { error: 'Seu papel não tem habilidade.' };
     if (now < (p.abilityReadyAt || 0)) {
       return { error: `Habilidade em recarga (${Math.ceil((p.abilityReadyAt - now) / 1000)}s).` };
@@ -360,16 +370,6 @@ export class Game {
         if (p.inVent) return { error: 'Saia do duto primeiro.' };
         p.phantomUntil = now + ability.invisibility * 1000;
         p.abilityReadyAt = now + ability.cooldown * 1000;
-        break;
-      }
-      case 'Viper': {
-        if (!target || !target.alive) return { error: 'Escolha um jogador vivo.' };
-        if (target.role === 'impostor') return { error: 'Não pode envenenar outro impostor.' };
-        if (dist(p, target) > ability.range) return { error: 'Alvo fora de alcance.' };
-        target.poisonedUntil = now + ability.delay * 1000;
-        target.poisonedBy = p.id;
-        p.abilityReadyAt = now + ability.cooldown * 1000;
-        this.log.push({ type: 'system', text: `${p.name} cuspiu veneno.` });
         break;
       }
       case 'Tracker': {
@@ -513,47 +513,39 @@ export class Game {
     this.push();
   }
 
-  /** Efeitos de papéis: veneno, bateria do cientista, tempo no duto. */
+  /** Número ajustável de uma habilidade (o host define no lobby). */
+  ability(key) {
+    const v = this.settings.ability?.[key];
+    return Number.isFinite(v) ? v : DEFAULT_SETTINGS.ability[key];
+  }
+
+  /** Números completos de uma habilidade do jogador. */
+  abilityOf(player) {
+    const type = player?.roleType;
+    if (type === 'Shapeshifter') return { shift: this.ability('shiftDuration'), cooldown: this.ability('shiftCooldown') };
+    if (type === 'Phantom') return { invisibility: this.ability('phantomDuration'), cooldown: this.ability('phantomCooldown') };
+    if (type === 'Engineer') return { ventTime: this.ability('ventTime'), cooldown: this.ability('ventCooldown') };
+    if (type === 'Scientist') return { drain: this.ability('vitalsDrain'), recharge: this.ability('vitalsRecharge') };
+    if (type === 'Tracker') return { uses: this.ability('trackUses'), duration: this.ability('trackDuration'), cooldown: this.ability('trackCooldown') };
+    if (type === 'Guardian Angel') return { shield: this.ability('shieldDuration'), cooldown: this.ability('shieldCooldown') };
+    return ABILITY[type] || null;
+  }
+
+  /** Efeitos de papéis: bateria do cientista, tempo no duto. */
   tickAbilities(dt, now) {
     for (const p of this.players.values()) {
       // engenheiro só pode ficar 5s no duto
-      if (p.inVent && p.roleType === 'Engineer' && p.ventEnteredAt && now - p.ventEnteredAt > ABILITY.Engineer.ventTime * 1000) {
+      if (p.inVent && p.roleType === 'Engineer' && p.ventEnteredAt && now - p.ventEnteredAt > this.ability('ventTime') * 1000) {
         this.exitVent(p.id);
         this.log.push({ type: 'system', text: `${p.name} saiu do duto no limite.` });
-      }
-      // veneno da víbora
-      if (p.alive && p.poisonedUntil && now >= p.poisonedUntil) {
-        p.alive = false;
-        p.inVent = false;
-        p.killedAt = now;
-        p.poisonedUntil = 0;
-        const killer = this.players.get(p.poisonedBy);
-        if (killer) killer.kills = (killer.kills || 0) + 1;
-        this.bodies.push({
-          id: 'body_' + uid(5),
-          playerId: p.id,
-          color: p.color,
-          name: p.name,
-          x: p.x,
-          y: p.y,
-          room: this.ship.roomAt(p.x, p.y),
-          at: now,
-          poisoned: true,
-        });
-        this.lastKill = {
-          at: now, x: p.x, y: p.y, victimId: p.id, victimColor: p.color,
-          killerId: p.poisonedBy, room: this.ship.roomAt(p.x, p.y), poisoned: true,
-        };
-        this.log.push({ type: 'system', text: `${p.name} morreu envenenado.` });
-        this.checkWin();
       }
       // bateria do cientista
       if (p.roleType === 'Scientist') {
         if (p.vitalsOpen) {
-          p.battery = Math.max(0, (p.battery ?? 100) - ABILITY.Scientist.drain * dt);
+          p.battery = Math.max(0, (p.battery ?? 100) - this.ability('vitalsDrain') * dt);
           if (now >= (p.vitalsUntil || 0) || p.battery <= 0) p.vitalsOpen = false;
         } else if (p.alive) {
-          p.battery = Math.min(100, (p.battery ?? 100) + ABILITY.Scientist.recharge * dt);
+          p.battery = Math.min(100, (p.battery ?? 100) + this.ability('vitalsRecharge') * dt);
         }
       }
       // expira metamorfose/fantasma
@@ -699,7 +691,6 @@ export class Game {
 
     target.alive = false;
     target.inVent = false;
-    target.poisonedUntil = 0;
     target.killedAt = Date.now();
     target.deathAt = Date.now();
     this.lastKill = {
@@ -785,7 +776,7 @@ export class Game {
     const p = this.players.get(playerId);
     if (!p?.inVent) return { error: 'Você não está em um duto.' };
     if (p.roleType === 'Engineer') {
-      p.abilityReadyAt = Date.now() + ABILITY.Engineer.cooldown * 1000;
+      p.abilityReadyAt = Date.now() + this.ability('ventCooldown') * 1000;
     }
     const vent = this.ship.ventById(p.ventId);
     p.inVent = false;
@@ -920,8 +911,6 @@ export class Game {
       p.voted = false;
       p.inVent = false;
       p.ventId = null;
-      p.poisonedUntil = 0;
-      p.poisonedBy = null;
       p.shieldUntil = 0;
       p.phantomUntil = 0;
       p.shiftTo = null;
@@ -1471,14 +1460,16 @@ export class Game {
       const invisible = (p.phantomUntil || 0) > now;
       return {
         id: p.id,
-        name: (shifted && p.id !== forId) ? shifted.name : p.name,
-        color: (shifted && p.id !== forId) ? shifted.color : p.color,
+        name: shifted ? shifted.name : p.name,
+        color: shifted ? shifted.color : p.color,
+        hat: shifted ? shifted.hat : p.hat,
+        pet: shifted ? shifted.pet : p.pet,
         realName: revealRole ? p.name : undefined,
         displayName: shifted ? shifted.name : p.name,
         shifted: !!shifted,
+        realColor: revealRole ? p.color : undefined,
         hidden: invisible && p.id !== forId && !(isImp && p.role === 'impostor'),
         shielded: (p.shieldUntil || 0) > now,
-        poisoned: (p.poisonedUntil || 0) > now,
         roleType: revealRole ? p.roleType : null,
         x: p.x,
         y: p.y,
@@ -1538,12 +1529,12 @@ export class Game {
         roleHint: ROLE_INFO[me.roleType]?.hint || '',
         roleTeam: ROLE_INFO[me.roleType]?.team || me.role,
         abilityReadyAt: me.abilityReadyAt || 0,
-        abilityCooldownMs: (ABILITY[me.roleType]?.cooldown || 0) * 1000,
+        abilityCooldownMs: (this.abilityOf(me)?.cooldown || 0) * 1000,
+        abilitySettings: this.settings.ability,
         shiftUntil: me.shiftUntil || 0,
         shiftName: me.shiftTo ? this.players.get(me.shiftTo)?.name || null : null,
         phantomUntil: me.phantomUntil || 0,
         shieldUntil: me.shieldUntil || 0,
-        poisonedUntil: me.poisonedUntil || 0,
         battery: Math.round(me.battery ?? 100),
         trackerUses: me.trackerUses ?? 0,
         tracked: (me.tracked || []).filter((t) => t.until > Date.now()),
