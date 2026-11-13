@@ -3,6 +3,7 @@ import { Renderer } from './renderer.js';
 import { HATS, SKINS, VISORS, PETS, PLATES } from '/shared/cosmetics.js';
 import { TASK_GAMES } from './tasks.js';
 import { sfx } from './sfx.js';
+import { music } from './music.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -59,10 +60,10 @@ window.addEventListener('resize', () => renderer.resize());
 /* ---------------- áudio (precisa de um gesto do usuário) ---------------- */
 function unlockAudio() {
   sfx.init();
-  if (C.state?.state === 'tasks') {
-    sfx.startAmbient();
-    sfx.setMuted(C.muted);
-  }
+  sfx.setMuted(C.muted);
+  if (C.state?.state === 'tasks') sfx.startAmbient();
+  // o navegador só libera áudio depois do primeiro gesto: a música entra aqui
+  if (music.desejada) music.play(music.desejada);
 }
 window.addEventListener('pointerdown', unlockAudio, { once: true });
 window.addEventListener('keydown', unlockAudio, { once: true });
@@ -99,6 +100,7 @@ window.__eject = (ej, st) => showEject(ej, st || C.state);
 window.__handleEjection = (st) => handleEjection(st);
 window.__audioCues = (st) => audioCues(st);
 window.__sfx = sfx;
+window.__music = music;
 
 socket.on('hello', (info) => {
   C.info = info;
@@ -318,6 +320,7 @@ $('btnLeave').addEventListener('click', () => {
   C.lastKillAt = 0;
   C.pendingEndSound = null;
   showScreen('home');
+  music.play('home');
   refreshGames();
 });
 
@@ -442,6 +445,10 @@ socket.on('state', (state) => {
     sfx.init();
     sfx.startAmbient();
   }
+  // música só no lobby (fora da partida); o resto do jogo fica com os efeitos
+  if (state.state === 'lobby') music.play('lobby');
+  else music.parar();
+
   if (state.state === 'tasks' && prev?.state !== 'tasks') {
     // o zumbido do casco volta quando a rodada recomeça
     sfx.stopAlarm();
@@ -1940,6 +1947,24 @@ $('btnMute').addEventListener('click', () => {
 });
 $('btnMute').classList.toggle('off', C.muted);
 $('btnMute').textContent = C.muted ? 'MUDO' : 'SOM';
+
+/* música de fundo (home + lobby) */
+function pintaMusica() {
+  const b = $('btnMusic');
+  if (!b) return;
+  b.classList.toggle('off', !music.ligada);
+  b.textContent = music.ligada ? '♪ MÚSICA' : '♪ OFF';
+  b.title = music.ligada ? 'Desligar música de fundo' : 'Ligar música de fundo';
+}
+$('btnMusic')?.addEventListener('click', () => {
+  music.setLigada(!music.ligada);
+  pintaMusica();
+  if (music.ligada) sfx.click();
+});
+pintaMusica();
+
+// tela inicial começa com o tema do menu (só toca depois do primeiro clique/tecla)
+music.play('home');
 
 function flashScreen(kind = '', ms = 180) {
   const f = $('screenFlash');

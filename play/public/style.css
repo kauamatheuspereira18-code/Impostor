@@ -518,6 +518,16 @@ html, body {
 /* ============================================================
    v2 — navegador de salas, mapa, ejeção e cinemáticas
    ============================================================ */
+.music-toggle {
+  position: absolute; right: 12px; bottom: 12px; z-index: 12;
+  background: rgba(10, 18, 30, 0.72); border: 1px solid rgba(140, 190, 255, 0.34);
+  color: #cfe1ff; font-size: 10px; font-weight: 800; letter-spacing: 0.7px;
+  border-radius: 999px; padding: 5px 11px; cursor: pointer;
+  backdrop-filter: blur(6px); transition: opacity 0.15s, background 0.15s;
+}
+.music-toggle:hover { background: rgba(30, 50, 80, 0.85); }
+.music-toggle.off { opacity: 0.45; }
+
 .net-pill {
   position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
   z-index: 80; padding: 4px 12px; border-radius: 999px;

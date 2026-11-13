@@ -57,6 +57,7 @@ A partida é autoritativa no servidor, então todos veem a mesma coisa.
 | **Admin** | Na Administração: mesa com quantos jogadores vivos há em cada sala, em tempo real. |
 | **Vitais** | Na Enfermaria: batimento de cada jogador (vivo/morto) com a cor dele. |
 | **Câmeras** | Na Segurança: quatro telas ao vivo (Cafeteria, Armas, Navegação, Armazém) com jogadores, corpos e ruído de vídeo; a luz vermelha pisca. |
+| **Música de fundo (extra)** | Fora do jogo original: a **tela inicial** toca "União Flasco" e, no **lobby** (partida criada e não começada), uma das três — "Vida de Empreguete", "Bomba Pet" e "Jin Sheng Yuan" — sorteada a cada entrada (nunca repete a anterior), em loop e baixinho (barramento próprio a 18%). Para ao começar a partida e volta ao sair para a tela inicial. Botão **♪ MÚSICA** no canto liga/desliga (salvo no navegador); o botão **SOM** silencia tudo. As gravações originais não vêm no repositório: o jogo sintetiza uma versão instrumental e, se você colocar seus arquivos em `public/music/` (veja o README de lá), usa os arquivos. |
 | **Som por tarefa** | Cada uma das 17 tarefas do Skeld tem efeito próprio (cartão magnético, faísca da fiação, laser/explosão dos asteroides, scanner, gotas da amostra, chirps do upload, energia desviada, sopro do filtro de O₂, volante, reator, batidas dos manifolds, motor, combustível, lixo, sonar do curso, cliques do distribuidor, escudos), com variação curta no passo e confirmação na conclusão. Dá para ouvir todos em **Ajuda → Sons**. |
 | **Som** | 33 efeitos sintetizados em WebAudio (sem arquivos): passos, kill (volume cai com a distância), report, sirene de reunião, contagem regressiva dos últimos 5 s, voto, ejeção (ar comprimido) e veredito, duto, porta, sabotagem/conserto, alarme de reator/O₂, vitória/derrota, tarefa e conclusão das tarefas, chat, emergência, morte/fantasma, habilidade de cada papel, aviso de kill/habilidade prontos, escudo e transformação de outros jogadores, além do zumbido ambiente do casco com fade. Botão de mudo persistido. |
 | **Animação** | Caminhada com pernas alternadas, mochila, viseira com reflexo, tremor de câmera no abate, respingos, duto abrindo, portas deslizando, visão em círculo. |
@@ -90,6 +91,7 @@ node tests/fidelity.test.mjs     # abate, tarefa de fantasma, portas, O₂, eje�
 node tests/roles.test.mjs        # papéis, tempos ajustáveis, cópia do metamorfo, cosméticos e bots com habilidades
 node tests/eject.test.mjs        # todos os desfechos da votação (impostor/tripulante, restam ou acabou, empate, pulo)
 node tests/audio.test.mjs        # cobertura de som: 33 efeitos, gatilhos por evento e cena de ejeção
+node tests/music.test.mjs        # música de fundo: trilhas, sorteio do lobby, volume e mudo
 node tests/fullgame2.test.mjs    # partida completa só com bots
 node tests/online.test.mjs       # criar/entrar/lista pública/reconexão/kick (servidor rodando)
 ```
@@ -185,9 +187,10 @@ Comparado ao cliente oficial, ainda não estão aqui:
   do catálogo usa desenho procedural determinístico (mesma silhueta/paleta por id), porque os
   textures/sprites originais não estão nos dados textuais do repositório.
 - **Cosméticos** (chapéus, pets, skins) e progressão.
-- **Música e voz**: os efeitos são sintetizados e não há trilha/música de menu nem chat de voz
-  (o áudio do jogo original vem de assets de áudio que não estão no repositório). Não há áudio
-  posicional (panning estéreo) — o kill só abaixa o volume com a distância.
+- **Voz**: não há chat de voz (só texto) e o áudio do jogo original não está no repositório —
+  os efeitos são sintetizados. A música de fundo (recurso extra) usa versões instrumentais
+  sintetizadas até você pôr arquivos seus em `public/music/`. Não há áudio posicional
+  (panning estéreo) — o kill só abaixa o volume com a distância.
 - **Matchmaking público com contas/regiões** — hoje as salas são por código e por lista.
 - **Geometria exata do mesh original** do Unity: as plantas foram reconstruídas a partir do
   mapa e das coordenadas oficiais, não extraídas do asset 3D (não há mesh em texto no repo).
