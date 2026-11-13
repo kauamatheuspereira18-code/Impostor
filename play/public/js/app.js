@@ -47,6 +47,7 @@ const C = {
   taskPulse: 0,
   ejectTimer: null,
   ejectResultTimer: null,
+  ejectFadeTimer: null,
   lastMeetingDone: 0,
   pendingEndSound: null,
   cues: { killReady: null, abilityReady: null, shields: new Set(), shifts: new Set(), hidden: new Set(), tracked: new Set(), sabotage: false, sabType: null, tasksDone: false },
@@ -1973,8 +1974,9 @@ function showEject(ej, state) {
   C.lastEjectLocal = Date.now();
 
   const restam = typeof state?.impostorsAlive === 'number' ? state.impostorsAlive : null;
-  const acabou = state?.state === 'ended';
-  const reveal = !!ej.role;
+  const winner = state?.winner || null;
+  const acabou = state?.state === 'ended' && !!winner;
+  const ganhei = acabou && ((winner === 'crew') === (state.you?.role === 'crew'));
 
   renderer.shake(9, 520);
   flashScreen('red', 220);
@@ -2008,29 +2010,24 @@ function showEject(ej, state) {
     $('ejectCaption').classList.add('show');
 
     if (ej.role === 'impostor') {
-      const ultimo = restam === 0;
+      const ultimo = restam === 0 || (acabou && winner === 'crew');
       sub.textContent = ultimo ? 'ERA O ÚLTIMO IMPOSTOR!' : 'ERA O IMPOSTOR!';
       sub.classList.add('crew');
-      if (ultimo) {
-        note.textContent = 'Todos os impostores foram eliminados — vitória da tripulação!';
-        note.classList.add('win');
-      } else if (restam !== null) {
-        note.textContent = `Restam ${restam} impostor${restam === 1 ? '' : 'es'} — a partida continua.`;
-      }
       sfx.ejectResult(true);
     } else if (ej.role === 'crew') {
       sub.textContent = 'Não era o impostor.';
-      if (acabou) {
-        note.textContent = 'Os impostores ficaram em maioria — fim de partida.';
-        note.classList.add('lose');
-      } else if (restam !== null) {
-        note.textContent = `Restam ${restam} impostor${restam === 1 ? '' : 'es'} — a partida continua.`;
-      }
       sfx.ejectResult(false);
     } else {
       sub.textContent = 'Papel desconhecido.';
-      note.textContent = acabou ? 'Fim de partida.' : '';
       sfx.ejectResult(false);
+    }
+
+    // o que acontece com a partida depois desta ejeção
+    if (acabou) {
+      note.textContent = state.gameOverReason || (winner === 'crew' ? 'A tripulação venceu!' : 'Os impostores venceram.');
+      note.classList.add(ganhei ? 'win' : 'lose');
+    } else if (restam !== null) {
+      note.textContent = `Restam ${restam} impostor${restam === 1 ? '' : 'es'} — a partida continua.`;
     }
 
     // quando o jogo acabou na ejeção, o som de resultado entra depois do veredito
@@ -2045,6 +2042,7 @@ function showEject(ej, state) {
   const fechar = () => {
     clearTimeout(C.ejectResultTimer);
     clearTimeout(C.ejectTimer);
+    clearTimeout(C.ejectFadeTimer);
     overlay.hidden = true;
     overlay.classList.remove('fade', 'result');
     $('ejectCaption').classList.remove('show');
@@ -2061,7 +2059,8 @@ function showEject(ej, state) {
   overlay.addEventListener('click', pular);
   document.addEventListener('keydown', onKey);
 
-  setTimeout(() => overlay.classList.add('fade'), 2700);
+  clearTimeout(C.ejectFadeTimer);
+  C.ejectFadeTimer = setTimeout(() => overlay.classList.add('fade'), 2700);
   clearTimeout(C.ejectTimer);
   C.ejectTimer = setTimeout(fechar, 3600);
 }

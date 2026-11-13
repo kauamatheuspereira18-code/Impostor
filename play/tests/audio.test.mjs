@@ -71,7 +71,8 @@ check('silêncio antes do veredito (2.1s)', /\}, 2100\)/.test(appSrc));
 check('veredito com som de acerto/erro', /sfx\.ejectResult\(true\)/.test(appSrc) && /sfx\.ejectResult\(false\)/.test(appSrc));
 check('contagem de impostores restantes', /impostorsAlive/.test(appSrc));
 check('último impostor encerra a partida na cena', /ERA O ÚLTIMO IMPOSTOR!/.test(appSrc));
-check('ejeção de tripulante avisa quando o jogo acabou', /Os impostores ficaram em maioria/.test(appSrc));
+check('ejeção mostra o motivo do fim da partida', /note\.textContent = state\.gameOverReason/.test(appSrc));
+check('cor do aviso segue o time do jogador', /note\.classList\.add\(ganhei \? 'win' : 'lose'\)/.test(appSrc));
 check('som de vitória/derrota espera a cinemática', /pendingEndSound/.test(appSrc));
 check('partida acaba na hora ao ejetar (servidor)', /if \(m\.ejectedId\) this\.checkWin\(\);/.test(
   fs.readFileSync(new URL('../server/game.js', import.meta.url), 'utf8')));
