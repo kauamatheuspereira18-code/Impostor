@@ -163,6 +163,10 @@
             <span class="action-ico">⚡</span>
             <span class="action-label">Usar</span>
           </button>
+          <button id="btnSpecial" class="action-btn action-special" hidden>
+            <span class="action-ico">▦</span>
+            <span class="action-label">Admin</span>
+          </button>
           <button id="btnVent" class="action-btn action-vent" hidden>
             <span class="action-ico">▤</span>
             <span class="action-label">Duto</span>
@@ -200,6 +204,18 @@
           <button id="ventNext" class="btn small">duto ▶</button>
           <button id="ventExit" class="btn small btn-primary">Sair</button>
         </div>
+      </div>
+    </div>
+
+    <!-- sala especial: admin / vitais / câmeras -->
+    <div id="specialPanel" class="special-panel" hidden>
+      <div class="special-card">
+        <div class="special-head">
+          <h3 id="specialTitle">ADMIN</h3>
+          <button id="specialClose" class="icon-btn">✕</button>
+        </div>
+        <div id="specialBody" class="special-body"></div>
+        <div class="special-foot" id="specialHint"></div>
       </div>
     </div>
 

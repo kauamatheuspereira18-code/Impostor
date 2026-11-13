@@ -73,6 +73,7 @@ function saveSession(res) {
    Boot: recebe dados do servidor (cores, presets, versão)
    ================================================================ */
 window.__state = () => C.state;
+window.__openSpecial = (kind) => openSpecial(kind);
 window.__testMove = (x, y) => { C.local.x = x; C.local.y = y; socket.emit('move', { x, y }); };
 
 socket.on('hello', (info) => {
@@ -300,6 +301,9 @@ socket.on('state', (state) => {
     sfx.stopAlarm();
   }
 
+  if (state.state === 'lobby' || state.state === 'ended') {
+    if (C.special) closeSpecial();
+  }
   if (state.state === 'lobby') {
     if (!prev || prev.state !== 'lobby') {
       closeTask();
@@ -623,6 +627,10 @@ function frame(now) {
       renderJoystick();
       updateCooldowns();
       updateActionAvailability();
+      if (C.special) {
+        if (C.special === 'Security') drawCameras();
+        else if (now - (C.specialAt || 0) > 400) { C.specialAt = now; renderSpecial(); }
+      }
     }
   }
   requestAnimationFrame(frame);
@@ -760,6 +768,164 @@ function buildDoorGrid(st) {
   }
 }
 
+/* ================================================================
+   Salas especiais: Admin, Vitais e Câmeras
+   ================================================================ */
+const SPECIAL_INFO = {
+  Admin: { title: 'ADMINISTRAÇÃO', label: 'Admin', hint: 'Mostra quantos jogadores vivos há em cada sala.' },
+  MedBay: { title: 'VITAIS', label: 'Vitais', hint: 'Batimento de cada tripulante: verde vivo, vermelho morto.' },
+  Security: { title: 'CÂMERAS', label: 'Câmeras', hint: 'A luz vermelha no canto pisca enquanto as câmeras estão ligadas.' },
+};
+const CAMERA_ROOMS = ['Cafeteria', 'Weapons', 'Nav', 'Storage'];
+
+function roomAtPoint(st, x, y) {
+  for (const room of st.ship?.spaces || []) {
+    if (pointInRoom(room, x, y)) return room;
+  }
+  return null;
+}
+
+function currentSpecial(st) {
+  const room = roomAtPoint(st, C.local.x, C.local.y);
+  return room && SPECIAL_INFO[room.id] ? room.id : null;
+}
+
+function openSpecial(kind) {
+  if (!kind || !SPECIAL_INFO[kind]) return;
+  C.special = kind;
+  $('specialPanel').hidden = false;
+  $('specialTitle').textContent = SPECIAL_INFO[kind].title;
+  $('specialHint').textContent = SPECIAL_INFO[kind].hint;
+  if (kind === 'Security') buildCameras();
+  renderSpecial();
+  sfx.click();
+}
+
+function closeSpecial() {
+  C.special = null;
+  $('specialPanel').hidden = true;
+  $('specialBody').innerHTML = '';
+}
+
+function buildCameras() {
+  const body = $('specialBody');
+  body.innerHTML = '<div class="cam-grid"></div>';
+  const grid = body.querySelector('.cam-grid');
+  for (const id of CAMERA_ROOMS) {
+    const room = C.state?.ship?.spaces.find((r) => r.id === id);
+    const tile = el('div', 'cam-tile');
+    tile.innerHTML = `<canvas></canvas><span class="cam-label">${escapeHtml(room?.name || id)}</span><span class="cam-rec"></span>`;
+    grid.append(tile);
+  }
+}
+
+function renderSpecial() {
+  const st = C.state;
+  if (!C.special || !st) return;
+  const body = $('specialBody');
+  if (C.special === 'Admin') {
+    const spaces = (st.ship?.spaces || []).filter((r) => r.id !== 'Admin');
+    body.innerHTML = '<div class="admin-grid"></div>';
+    const grid = body.querySelector('.admin-grid');
+    for (const room of spaces) {
+      const count = st.players.filter((p) => p.alive && pointInRoom(room, p.x, p.y)).length;
+      const cell = el('div', 'admin-cell' + (count ? '' : ' zero'));
+      cell.innerHTML = `<b>${count}</b><span>${escapeHtml(room.name)}</span>`;
+      grid.append(cell);
+    }
+  } else if (C.special === 'MedBay') {
+    body.innerHTML = '<div class="vitals-list"></div>';
+    const list = body.querySelector('.vitals-list');
+    for (const p of [...st.players].sort((a, b) => Number(b.alive) - Number(a.alive))) {
+      const color = C.colors.find((c) => c.id === p.color)?.hex || '#888';
+      const row = el('div', 'vital-row');
+      row.innerHTML = `<span class="vital-dot${p.alive ? '' : ' dead'}"></span>
+        <span class="vital-bean">${miniBean(color)}</span>
+        <span class="vital-name">${escapeHtml(p.name)}${p.id === st.you.id ? ' (você)' : ''}</span>
+        <span class="vital-state">${p.alive ? 'VIVO' : 'MORTO'}</span>`;
+      list.append(row);
+    }
+  } else if (C.special === 'Security') {
+    drawCameras();
+  }
+}
+
+function drawCameras() {
+  const st = C.state;
+  if (!st) return;
+  const canvases = $('specialBody').querySelectorAll('.cam-tile canvas');
+  const now = Date.now();
+  canvases.forEach((canvas, i) => {
+    const id = CAMERA_ROOMS[i];
+    const room = st.ship.spaces.find((r) => r.id === id);
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = canvas.clientWidth || 260;
+    const h = canvas.clientHeight || 150;
+    canvas.width = Math.floor(w * dpr);
+    canvas.height = Math.floor(h * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#0a141f';
+    ctx.fillRect(0, 0, w, h);
+    if (!room) return;
+    const [x1, y1, x2, y2] = room.bounds;
+    const pad = 18;
+    const z = Math.min((w - pad * 2) / (x2 - x1), (h - pad * 2) / (y2 - y1));
+    const ox = (w - (x2 - x1) * z) / 2;
+    const oy = (h - (y2 - y1) * z) / 2;
+    const toS = (x, y) => [ox + (x - x1) * z, oy + (y2 - y) * z];
+
+    ctx.beginPath();
+    for (const shape of room.shapes || []) {
+      (shape.points || []).forEach(([px, py], k) => {
+        const [sx, sy] = toS(px, py);
+        k ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy);
+      });
+      ctx.closePath();
+    }
+    ctx.fillStyle = 'rgba(126, 152, 186, 0.35)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(180, 220, 255, 0.55)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // ruído de vídeo
+    ctx.globalAlpha = 0.06;
+    ctx.fillStyle = '#8effc9';
+    for (let n = 0; n < 40; n++) ctx.fillRect(Math.random() * w, Math.random() * h, 2, 1);
+    ctx.globalAlpha = 1;
+
+    for (const p of st.players) {
+      if (!p.alive) continue;
+      if (!pointInRoom(room, p.x, p.y)) continue;
+      const [sx, sy] = toS(p.x, p.y);
+      const color = C.colors.find((c) => c.id === p.color)?.hex || '#c51111';
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, 5, 6.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#a8e0ef';
+      ctx.beginPath();
+      ctx.ellipse(sx + 1.6, sy - 2, 2.4, 1.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    for (const b of st.bodies || []) {
+      if (!pointInRoom(room, b.x, b.y)) continue;
+      const [sx, sy] = toS(b.x, b.y);
+      ctx.fillStyle = 'rgba(190, 30, 45, 0.85)';
+      ctx.beginPath();
+      ctx.arc(sx, sy, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // timestamp tipo CCTV
+    ctx.fillStyle = 'rgba(180, 255, 220, 0.55)';
+    ctx.font = '9px monospace';
+    const t = new Date(now);
+    ctx.fillText(`${t.toLocaleTimeString('pt-BR')} CAM ${i + 1}`, w - 92, h - 8);
+  });
+}
+
 function updateActionAvailability() {
   const st = C.state;
   if (!st || st.state !== 'tasks') return;
@@ -771,6 +937,7 @@ function updateActionAvailability() {
   const ventBtn = $('btnVent');
   const sabBtn = $('btnSabotage');
   const emgBtn = $('btnEmergency');
+  const specialBtn = $('btnSpecial');
 
   const alive = me.alive;
   // DUTO: perto de um duto e impostor
@@ -832,6 +999,18 @@ function updateActionAvailability() {
   // EMERGÊNCIA
   const nearEmg = Math.hypot(C.local.x - st.ship.emergency.x, C.local.y - st.ship.emergency.y) < st.ship.emergency.radius;
   emgBtn.hidden = !(nearEmg && alive && st.emergencyLeft > 0);
+
+  // SALAS ESPECIAIS (admin, vitais, câmeras)
+  const special = currentSpecial(st);
+  specialBtn.hidden = !special;
+  if (special) {
+    specialBtn.querySelector('.action-label').textContent = SPECIAL_INFO[special].label;
+    specialBtn.classList.add('pulse');
+    specialBtn.dataset.kind = special;
+    if (C.special && C.special !== special) closeSpecial();
+  } else if (C.special) {
+    closeSpecial();
+  }
 
   // UI do duto
   const ventUi = $('ventUi');
@@ -933,6 +1112,12 @@ $('sabClose').addEventListener('click', () => $('sabotageModal').setAttribute('h
 $('btnEmergency').addEventListener('click', () => {
   socket.emit('emergency', (res) => { if (res?.error) toast(res.error); });
 });
+
+$('btnSpecial').addEventListener('click', () => {
+  const kind = $('btnSpecial').dataset.kind;
+  if (kind) openSpecial(kind);
+});
+$('specialClose').addEventListener('click', closeSpecial);
 
 $('ventNext').addEventListener('click', () => socket.emit('ventMove', { direction: 1 }, (r) => { if (r?.error) toast(r.error); }));
 $('ventPrev').addEventListener('click', () => socket.emit('ventMove', { direction: -1 }, (r) => { if (r?.error) toast(r.error); }));

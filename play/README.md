@@ -54,6 +54,9 @@ A partida é autoritativa no servidor, então todos veem a mesma coisa.
 | **Fantasmas** | Mortos atravessam paredes, continuam completando as tarefas (contam na barra) e assistem à votação. |
 | **Bots** | Fazem tarefas, matam, reportam, consertam sabotagem, votam em duas ondas e continuam tarefas como fantasmas. |
 | **Mapa (Tab)** | Mapa do navio com salas nomeadas, sua posição, suas tarefas, sabotagem piscando e (para impostor) os demais jogadores. |
+| **Admin** | Na Administração: mesa com quantos jogadores vivos há em cada sala, em tempo real. |
+| **Vitais** | Na Enfermaria: batimento de cada jogador (vivo/morto) com a cor dele. |
+| **Câmeras** | Na Segurança: quatro telas ao vivo (Cafeteria, Armas, Navegação, Armazém) com jogadores, corpos e ruído de vídeo; a luz vermelha pisca. |
 | **Som** | Efeitos sintetizados em WebAudio: passos, kill, report, sirene de reunião, voto, ejeção, duto, porta, tarefa e alarme do reator. Botão de mudo. |
 | **Animação** | Caminhada com pernas alternadas, mochila, viseira com reflexo, tremor de câmera no abate, respingos, duto abrindo, portas deslizando, visão em círculo. |
 | **Geometria** | 14 salas com planta própria (octógono na Cafeteria, canto cortado em Armas, bico na Navegação, Armazém em L) e 21 corredores, colisão por polígono. |
@@ -142,7 +145,6 @@ Comparado ao cliente oficial, ainda não estão aqui:
 - **Outros mapas** (Mira, Polus, Airship, Fungle): os dados de tarefas/dutos já estão no
   repositório, mas falta desenhar e validar a geometria jogável de cada um.
 - **Papéis opcionais** (Engenheiro, Cientista, Anjo, Shapeshifter, Fantasma, Rastreador).
-- **Câmeras de segurança, vitals e admin table**.
 - **Cosméticos** (chapéus, pets, skins) e progressão.
 - **Matchmaking público com contas/regiões** — hoje as salas são por código e por lista.
 - **Geometria exata do mesh original** do Unity: as plantas foram reconstruídas a partir do
