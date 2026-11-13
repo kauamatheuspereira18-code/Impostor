@@ -70,15 +70,20 @@ console.log('[2] metamorfo');
 
   // cópia perfeita: cor, chapéu e pet
   shifter.abilityReadyAt = 0;
-  shifter.hat = 3; shifter.pet = 2;
-  other.hat = 5; other.pet = 4;
+  shifter.hat = 3; shifter.pet = 2; shifter.skin = 1; shifter.visor = 1; shifter.plate = 1;
+  other.hat = 5; other.pet = 4; other.skin = 6; other.visor = 8; other.plate = 5;
   g.useAbility('h', 'Shapeshifter', other.id);
   const copy = g.serialize('b3').players.find((p) => p.id === 'h');
   check('copia o chapéu', copy.hat === other.hat, `hat=${copy.hat}`);
   check('copia o pet', copy.pet === other.pet, `pet=${copy.pet}`);
+  check('copia o traje', copy.skin === other.skin, `skin=${copy.skin}`);
+  check('copia o visor', copy.visor === other.visor, `visor=${copy.visor}`);
+  check('copia a placa de nome', copy.plate === other.plate, `plate=${copy.plate}`);
   check('copia a cor', copy.color === other.color);
   const selfCopy = g.serialize('h').players.find((p) => p.id === 'h');
   check('eu vejo o chapéu copiado', selfCopy.hat === other.hat && selfCopy.pet === other.pet);
+  check('eu vejo o traje/visor/placa copiados',
+    selfCopy.skin === other.skin && selfCopy.visor === other.visor && selfCopy.plate === other.plate);
   check('cosméticos originais guardados', g.players.get('h').hat === 3 && g.players.get('h').pet === 2);
 }
 
@@ -242,7 +247,26 @@ console.log('[11] tempos das habilidades ajustáveis pelo host');
   check('marcações ajustadas', g.settings.ability.trackUses === 5);
 }
 
-console.log('[12] configurações de papéis');
+console.log('[12] catálogo de cosméticos oficial');
+{
+  const { HATS, SKINS, VISORS, PETS, PLATES, COSMETIC_TOTALS } = await import('../shared/cosmetics.js');
+  check('584 chapéus oficiais', HATS.length === 584, `n=${HATS.length}`);
+  check('215 trajes oficiais', SKINS.length === 215, `n=${SKINS.length}`);
+  check('185 visores oficiais', VISORS.length === 185, `n=${VISORS.length}`);
+  check('53 pets oficiais', PETS.length === 53, `n=${PETS.length}`);
+  check('166 placas oficiais', PLATES.length === 166, `n=${PLATES.length}`);
+  check('totais batem com os dados do jogo', COSMETIC_TOTALS.hat === 584 && COSMETIC_TOTALS.nameplate === 166, JSON.stringify(COSMETIC_TOTALS));
+  check('primeiro item é "sem nada"', HATS[0].art === 0 && SKINS[0].art === 0 && VISORS[0].art === 0 && PETS[0].art === 0 && PLATES[0].art === 0);
+  check('todos têm id oficial', [...HATS, ...SKINS, ...VISORS, ...PETS, ...PLATES].every((x) => /^(hat|hats|skin|visor|pet|nameplate)_/.test(x.id)));
+  check('itens sem arte dedicada não são "sem nada"', HATS.filter((x) => !x.curated).every((x) => x.art !== 0));
+  const g2 = newGame();
+  const p = g2.players.get('h');
+  p.hat = 100000; p.skin = -50; p.visor = 9999; p.pet = 9999; p.plate = 9999;
+  g2.setSettings({}); // não deve mexer nos cosméticos
+  check('índices grandes continuam seguros no serialize', !!g2.serialize('h').players.find((x) => x.id === 'h'));
+}
+
+console.log('[13] configurações de papéis');
 {
   const g = newGame();
   g.setSettings({ roles: { engineer: 9, phantom: 2.4, shapeshifter: '2' } });

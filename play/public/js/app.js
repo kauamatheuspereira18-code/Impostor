@@ -1,6 +1,6 @@
 import { GAME_CONSTANTS, RULE_PRESETS, SABOTAGE_INFO, MAP_SABOTAGES, ROLE_INFO, ABILITY_FIELDS } from '/shared/rules.js';
 import { Renderer } from './renderer.js';
-import { HATS, PETS } from './art.js';
+import { HATS, SKINS, VISORS, PETS, PLATES } from '/shared/cosmetics.js';
 import { TASK_GAMES } from './tasks.js';
 import { sfx } from './sfx.js';
 
@@ -18,7 +18,7 @@ const socket = io({ transports: ['websocket', 'polling'] });
 
 /** estado global do cliente */
 const C = {
-  me: { name: 'Tripulante', color: 0, hat: 0, pet: 0 },
+  me: { name: 'Tripulante', color: 0, hat: 0, skin: 0, visor: 0, pet: 0, plate: 0 },
   state: null,
   code: null,
   keys: new Set(),
@@ -105,20 +105,37 @@ socket.on('hello', (info) => {
 socket.on('toast', (msg) => toast(msg));
 
 function buildCosmeticSelects() {
-  const hat = $('hatSelect');
-  const pet = $('petSelect');
-  hat.innerHTML = HATS.map((n, i) => `<option value="${i}">${escapeHtml(n)}</option>`).join('');
-  pet.innerHTML = PETS.map((n, i) => `<option value="${i}">${escapeHtml(n)}</option>`).join('');
-  hat.value = String(C.me.hat);
-  pet.value = String(C.me.pet);
-  const send = () => {
-    C.me.hat = +hat.value;
-    C.me.pet = +pet.value;
-    if (C.state?.state === 'lobby') socket.emit('cosmetics', { hat: C.me.hat, pet: C.me.pet });
-    sfx.click();
+  const lists = { hat: HATS, skin: SKINS, visor: VISORS, pet: PETS, plate: PLATES };
+  const selects = {
+    hat: $('hatSelect'), skin: $('skinSelect'), visor: $('visorSelect'),
+    pet: $('petSelect'), plate: $('plateSelect'),
   };
-  hat.addEventListener('change', send);
-  pet.addEventListener('change', send);
+  for (const [key, list] of Object.entries(lists)) {
+    const sel = selects[key];
+    // destaques (com desenho dedicado) primeiro, depois o catálogo completo
+    const top = list.filter((x) => x.curated);
+    const rest = list.filter((x) => !x.curated);
+    const opt = (x, i) => `<option value="${list.indexOf(x)}">${escapeHtml(x.name)}</option>`;
+    sel.innerHTML = `<optgroup label="Destaques">${top.map((x) => opt(x)).join('')}</optgroup>`
+      + `<optgroup label="Todos (${rest.length})">${rest.map((x) => opt(x)).join('')}</optgroup>`;
+    sel.value = String(C.me[key] || 0);
+    sel.addEventListener('change', () => {
+      C.me[key] = +sel.value;
+      if (C.state?.state === 'lobby') {
+        socket.emit('cosmetics', {
+          hat: C.me.hat, skin: C.me.skin, visor: C.me.visor, pet: C.me.pet, plate: C.me.plate,
+        });
+      }
+      sfx.click();
+    });
+  }
+  // mantém os selects sincronizados quando o servidor corrige algum valor
+  C.syncCosmetics = () => {
+    for (const [key, sel] of Object.entries(selects)) {
+      const want = String(C.me[key] || 0);
+      if (sel.value !== want) sel.value = want;
+    }
+  };
 }
 
 function buildColorGrid() {
@@ -183,7 +200,7 @@ function renderGameList(games) {
     btn?.addEventListener('click', () => {
       C.me.name = nameValue();
       sfx.init();
-      socket.emit('join', { code: g.code, name: C.me.name, color: C.me.color, hat: C.me.hat, pet: C.me.pet }, (res) => {
+      socket.emit('join', { code: g.code, name: C.me.name, color: C.me.color, hat: C.me.hat, skin: C.me.skin, visor: C.me.visor, pet: C.me.pet, plate: C.me.plate }, (res) => {
         if (res?.error) return showHomeError(res.error);
         onJoined(res);
       });
@@ -215,7 +232,7 @@ function nameValue() {
 
 $('btnSolo').addEventListener('click', () => {
   C.me.name = nameValue();
-  socket.emit('solo', { name: C.me.name, color: C.me.color, hat: C.me.hat, pet: C.me.pet }, (res) => {
+  socket.emit('solo', { name: C.me.name, color: C.me.color, hat: C.me.hat, skin: C.me.skin, visor: C.me.visor, pet: C.me.pet, plate: C.me.plate }, (res) => {
     if (res?.error) return showHomeError(res.error);
     onJoined(res);
   });
@@ -223,7 +240,7 @@ $('btnSolo').addEventListener('click', () => {
 
 $('btnCreate').addEventListener('click', () => {
   C.me.name = nameValue();
-  socket.emit('create', { name: C.me.name, color: C.me.color, hat: C.me.hat, pet: C.me.pet }, (res) => {
+  socket.emit('create', { name: C.me.name, color: C.me.color, hat: C.me.hat, skin: C.me.skin, visor: C.me.visor, pet: C.me.pet, plate: C.me.plate }, (res) => {
     if (res?.error) return showHomeError(res.error);
     onJoined(res);
   });
@@ -233,7 +250,7 @@ $('btnJoin').addEventListener('click', () => {
   C.me.name = nameValue();
   const code = $('codeInput').value.trim().toUpperCase();
   if (code.length < 3) return showHomeError('Digite o código da sala.');
-  socket.emit('join', { code, name: C.me.name, color: C.me.color, hat: C.me.hat, pet: C.me.pet }, (res) => {
+  socket.emit('join', { code, name: C.me.name, color: C.me.color, hat: C.me.hat, skin: C.me.skin, visor: C.me.visor, pet: C.me.pet, plate: C.me.plate }, (res) => {
     if (res?.error) return showHomeError(res.error);
     onJoined(res);
   });

@@ -62,7 +62,7 @@ A partida é autoritativa no servidor, então todos veem a mesma coisa.
 | **Geometria** | 14 salas com planta própria (octógono na Cafeteria, canto cortado em Armas, bico na Navegação, Armazém em L) e 21 corredores ligados de acordo com o mapa clássico, colisão por polígono. |
 | **Tarefas visuais** | Scan na Enfermaria, tiros de asteroide em Armas e anéis em Escudos aparecem para todos, como no jogo. |
 | **Papéis** | Até 3 impostores com Metamorfo e Fantasma; tripulantes com Engenheiro, Cientista, Barulhento, Rastreador, Anjo da Guarda ou sem papel. Configurável de 0 a 3 de cada no lobby. |
-| **Cosméticos** | 11 chapéus e 4 pets desenhados em canvas, escolhidos na tela inicial e copiados pelo Metamorfo junto com cor e nome. |
+| **Cosméticos** | Catálogo oficial completo extraído de `Cosmetics.json`: **584 chapéus, 215 trajes, 185 visores, 166 placas de nome e 53 pets**. Traje, visor, chapéu, pet e placa são escolhidos na tela inicial; o Metamorfo copia tudo junto com cor e nome. |
 | **Habilidades** | Botão de habilidade com recarga em anel, escolha de alvo, transformação com faíscas, invisibilidade, veneno, escudo, marcações no mapa, vitais com bateria e alarme do Barulhento. |
 | **Revelação de papel** | Cartão animado no começo de cada partida com papel, equipe, descrição e cúmplices. |
 
@@ -78,6 +78,7 @@ A partida é autoritativa no servidor, então todos veem a mesma coisa.
 ```bash
 cd play
 node tools/validate-map.mjs      # 14 salas, 26 consoles, 14 dutos, 13 portas, props e conectividade
+node tools/extract-cosmetics.mjs # regenera o catálogo de cosméticos a partir dos dados do jogo
 node tests/new_game.test.mjs     # socket: lobby, tarefas, sabotagem, reunião e voto
 node tests/crewwin.test.mjs      # vitória dos tripulantes
 node tests/taskwin.test.mjs      # vitória por tarefas (com fantasma terminando as dele)
@@ -147,6 +148,7 @@ play/
 │   ├── rooms.js         # plantas das 14 salas + 21 corredores + props
 │   ├── mapdata.js       # dados oficiais extraídos do repositório Impostor
 │   ├── rules.js         # constantes, presets e sabotagens
+│   ├── cosmetics.js     # catálogo oficial de cosméticos (gerado)
 │   └── skeld.js         # botão de emergência e enquadramento
 ├── public/
 │   ├── index.html       # home, lobby, HUD, mapa, reunião, ejeção, chat
@@ -160,6 +162,7 @@ play/
 ├── tests/               # integração via socket e regras do motor
 └── tools/
     ├── extract-mapdata.mjs
+    ├── extract-cosmetics.mjs   # gera shared/cosmetics.js a partir de Cosmetics.json
     └── validate-map.mjs
 ```
 
@@ -171,8 +174,9 @@ Comparado ao cliente oficial, ainda não estão aqui:
   geometria dos demais não é usada.
 - **Bots usando habilidades**: os bots recebem papéis, mas não acionam Metamorfo/Fantasma
   nem o escudo do Anjo — só matam, fazem tarefas, reportam e votam.
-- **Trajes/skins completos**: existem cor, chapéu e pet; não há o catálogo inteiro de skins,
-  visores e nameplates do jogo.
+- **Arte dos cosméticos**: os itens gratuitos e os mais icônicos têm desenho dedicado; o resto
+  do catálogo usa desenho procedural determinístico (mesma silhueta/paleta por id), porque os
+  textures/sprites originais não estão nos dados textuais do repositório.
 - **Cosméticos** (chapéus, pets, skins) e progressão.
 - **Matchmaking público com contas/regiões** — hoje as salas são por código e por lista.
 - **Geometria exata do mesh original** do Unity: as plantas foram reconstruídas a partir do

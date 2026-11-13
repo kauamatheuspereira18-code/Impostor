@@ -1,12 +1,14 @@
 /* Renderização do Skeld com a geometria oficial, arte procedural e animações. */
 import { GAME_CONSTANTS } from '/shared/rules.js';
 import { COLORS } from '/shared/mapdata.js';
+import { HATS, SKINS, VISORS, PETS, PLATES } from '/shared/cosmetics.js';
 import {
   drawSpace, drawCrew, drawCorpse, drawVent, drawDoor,
-  drawEmergencyButton, drawMeetingTable, drawPet, shade,
+  drawEmergencyButton, drawMeetingTable, drawPet, drawPlate, shade,
 } from './art.js';
 
 const lerp = (a, b, t) => a + (b - a) * t;
+const pickCosmetic = (list, index) => list[Math.max(0, Math.min(list.length - 1, Number(index) || 0))] || list[0];
 
 export class Renderer {
   constructor(canvas) {
@@ -542,6 +544,21 @@ export class Renderer {
     ctx.fillStyle = isMe ? '#a8eeff' : '#f4f9ff';
     ctx.fillText(label, s.x, by + 0.5);
     ctx.shadowBlur = 0;
+    const plate = pickCosmetic(PLATES, p.plate);
+    if (plate.art > 0) {
+      const tw = ctx.measureText(label).width;
+      drawPlate(ctx, {
+        art: plate.art,
+        pal: plate.pal,
+        x: s.x,
+        y: by + 0.5,
+        w: tw + h * 0.34,
+        h: h * 0.3,
+        alpha: isMe ? 0.95 : 0.85,
+      });
+      ctx.fillStyle = isMe ? '#a8eeff' : '#f4f9ff';
+      ctx.fillText(label, s.x, by + 0.5);
+    }
     ctx.restore();
 
     drawCrew(ctx, {
@@ -555,13 +572,19 @@ export class Renderer {
       ghost,
       alpha: ghost ? 0.55 : (p.hidden ? 0.42 : 1),
       highlight: false,
-      hat: p.hat || 0,
+      hat: pickCosmetic(HATS, p.hat).art,
+      hatPal: pickCosmetic(HATS, p.hat).pal,
+      skin: pickCosmetic(SKINS, p.skin).art,
+      skinPal: pickCosmetic(SKINS, p.skin).pal,
+      visor: pickCosmetic(VISORS, p.visor).art,
+      visorPal: pickCosmetic(VISORS, p.visor).pal,
     });
 
     // pet flutuando ao lado (como no jogo)
-    if (p.pet && !ghost) {
+    const petItem = pickCosmetic(PETS, p.pet);
+    if (petItem.art > 0 && !ghost) {
       drawPet(ctx, {
-        id: p.pet,
+        id: petItem.art,
         x: s.x - sm.facing * h * 0.62,
         y: s.y + h * 0.18,
         h,

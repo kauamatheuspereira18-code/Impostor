@@ -49,18 +49,12 @@ function roundRect(ctx, x, y, w, h, r) {
    ghost    fantasma (translúcido, sem sombra, cauda ondulada)
    outline  contorno escuro (o jogo usa silhueta recortada)
 */
-/* Catálogo enxuto de chapéus e pets (mesmas categorias do jogo). */
-export const HATS = [
-  'Sem chapéu', 'Boné', 'Gorro', 'Cartola', 'Coroa', 'Auréola',
-  'Antena', 'Chapéu de festa', 'Flor', 'Pirata', 'Capacete', 'Chifres',
-];
-export const PETS = ['Sem pet', 'Mini tripulante', 'Cachorro', 'Gato', 'Robô'];
-
 export function drawCrew(ctx, o) {
   const {
     x, y, h = 40, color = '#c51111', facing = 1,
     walk = 0, phase = 0, ghost = false, alpha = 1, outline = true,
-    dead = false, highlight = false, hat = 0,
+    dead = false, highlight = false,
+    hat = 0, hatPal = null, skin = 0, skinPal = null, visor = 0, visorPal = null,
   } = o;
   const w = h * 0.74;
   ctx.save();
@@ -126,28 +120,11 @@ export function drawCrew(ctx, o) {
   ctx.fill();
   ctx.restore();
 
-  // viseira
-  const vw = w * 0.68;
-  const vh = h * 0.30;
-  const vx = w * 0.02;
-  const vy = top + h * 0.16;
-  const visorGrad = ctx.createLinearGradient(vx, vy, vx + vw, vy + vh);
-  visorGrad.addColorStop(0, '#dff6ff');
-  visorGrad.addColorStop(0.45, '#9fdcea');
-  visorGrad.addColorStop(1, '#5fb6cc');
-  ctx.fillStyle = visorGrad;
-  roundRect(ctx, vx, vy, vw, vh, vh * 0.52);
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(10,30,45,0.55)';
-  ctx.lineWidth = Math.max(1, h * 0.026);
-  ctx.stroke();
-  // reflexo
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  roundRect(ctx, vx + vw * 0.16, vy + vh * 0.18, vw * 0.30, vh * 0.26, vh * 0.13);
-  ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.45)';
-  roundRect(ctx, vx + vw * 0.55, vy + vh * 0.55, vw * 0.22, vh * 0.16, vh * 0.08);
-  ctx.fill();
+  // traje (skin) por cima do corpo
+  if (skin > 0) drawSkinArt(ctx, skin, { w, h, top, color, pal: skinPal, bodyH });
+
+  // viseira (com as variantes oficiais)
+  drawVisorArt(ctx, visor, { w, h, top, pal: visorPal });
 
   // fantasma: cauda ondulada no lugar das pernas
   if (ghost) {
@@ -170,7 +147,7 @@ export function drawCrew(ctx, o) {
   }
 
   // chapéu (desenhado no mesmo espaço do corpo)
-  if (hat > 0 && !ghost) drawHatInBody(ctx, hat, { w, h, top, color, phase });
+  if (hat > 0 && !ghost) drawHatInBody(ctx, hat, { w, h, top, color, phase, pal: hatPal });
 
   if (highlight) {
     ctx.strokeStyle = 'rgba(255,255,255,0.55)';
@@ -186,7 +163,7 @@ export function drawCrew(ctx, o) {
 
 /** Chapéus desenhados no sistema de coordenadas do corpo. */
 function drawHatInBody(ctx, id, o) {
-  const { w, h, top, color, phase } = o;
+  const { w, h, top, color, phase, pal } = o;
   const cx = 0;
   const hy = top;              // topo da cabeça
   const hw = w * 0.84;         // largura do chapéu
@@ -358,6 +335,348 @@ function drawHatInBody(ctx, id, o) {
   }
   ctx.restore();
   void color;
+}
+
+/** Trajes (skins) desenhados por cima do corpo, recortados na silhueta. */
+function drawSkinArt(ctx, art, o) {
+  const { w, h, top, color, pal, bodyH } = o;
+  const p1 = pal?.[0] || '#2f6fd0';
+  const p2 = pal?.[1] || '#9fdcea';
+  const swapped = { p1, p2 };
+  ctx.save();
+  roundRect(ctx, -w / 2, top, w, bodyH, w * 0.46);
+  ctx.clip();
+  switch (art) {
+    case 1: { // astronauta
+      ctx.fillStyle = swapped.p2;
+      roundRect(ctx, -w * 0.5, top, w, bodyH * 0.34, w * 0.2);
+      ctx.fill();
+      ctx.fillStyle = shade(swapped.p1, 30);
+      roundRect(ctx, -w * 0.34, top + bodyH * 0.06, w * 0.68, bodyH * 0.16, w * 0.1);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      roundRect(ctx, -w * 0.46, top + bodyH * 0.42, w * 0.14, bodyH * 0.34, w * 0.07);
+      ctx.fill();
+      break;
+    }
+    case 2: { // capitão
+      ctx.fillStyle = swapped.p1;
+      roundRect(ctx, -w * 0.5, top + bodyH * 0.18, w, bodyH * 0.5, w * 0.2);
+      ctx.fill();
+      ctx.fillStyle = '#f6c945';
+      for (const y of [0.26, 0.34]) {
+        roundRect(ctx, -w * 0.42, top + bodyH * y, w * 0.84, h * 0.022, h * 0.011);
+        ctx.fill();
+      }
+      ctx.fillStyle = '#f6c945';
+      for (const dx of [-0.12, 0.12]) {
+        ctx.beginPath();
+        ctx.arc(w * dx, top + bodyH * 0.47, h * 0.016, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+    case 3: { // mecânico
+      ctx.fillStyle = '#8a97a8';
+      roundRect(ctx, -w * 0.46, top + bodyH * 0.2, w * 0.92, bodyH * 0.34, w * 0.12);
+      ctx.fill();
+      ctx.fillStyle = '#5d6979';
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 2; j++) {
+          ctx.beginPath();
+          ctx.arc(-w * 0.3 + i * w * 0.3, top + bodyH * (0.26 + j * 0.22), h * 0.014, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      ctx.fillStyle = '#3b4553';
+      roundRect(ctx, -w * 0.18, top + bodyH * 0.62, w * 0.36, h * 0.03, h * 0.015);
+      ctx.fill();
+      break;
+    }
+    case 4: { // militar (camo)
+      const spots = [[-0.3, 0.28], [0.06, 0.36], [0.3, 0.24], [-0.16, 0.5], [0.24, 0.52], [-0.36, 0.62], [0.02, 0.68]];
+      ctx.fillStyle = '#4a5a34';
+      roundRect(ctx, -w * 0.5, top + bodyH * 0.16, w, bodyH * 0.66, w * 0.2);
+      ctx.fill();
+      for (const [dx, dy] of spots) {
+        ctx.fillStyle = dy % 0.3 ? '#6b7d48' : '#33402a';
+        ctx.beginPath();
+        ctx.ellipse(w * dx, top + bodyH * dy, w * 0.16, h * 0.05, dx, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+    case 5: { // policial
+      ctx.fillStyle = '#1f3d6b';
+      roundRect(ctx, -w * 0.5, top + bodyH * 0.18, w, bodyH * 0.56, w * 0.18);
+      ctx.fill();
+      ctx.fillStyle = '#f6c945';
+      ctx.beginPath();
+      ctx.moveTo(-w * 0.2, top + bodyH * 0.32);
+      ctx.lineTo(-w * 0.1, top + bodyH * 0.3);
+      ctx.lineTo(-w * 0.1, top + bodyH * 0.44);
+      ctx.lineTo(-w * 0.2, top + bodyH * 0.46);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#0f2547';
+      roundRect(ctx, -w * 0.5, top + bodyH * 0.66, w, h * 0.035, h * 0.01);
+      ctx.fill();
+      break;
+    }
+    case 6: { // cientista (jaleco)
+      ctx.fillStyle = '#f2f6fb';
+      roundRect(ctx, -w * 0.5, top + bodyH * 0.22, w, bodyH * 0.58, w * 0.16);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(150,170,190,0.7)';
+      ctx.lineWidth = Math.max(1, h * 0.02);
+      ctx.beginPath();
+      ctx.moveTo(0, top + bodyH * 0.22);
+      ctx.lineTo(0, top + bodyH * 0.8);
+      ctx.stroke();
+      ctx.fillStyle = '#cfe0f2';
+      roundRect(ctx, w * 0.06, top + bodyH * 0.44, w * 0.24, bodyH * 0.16, w * 0.05);
+      ctx.fill();
+      ctx.fillStyle = '#2f6fd0';
+      roundRect(ctx, w * 0.1, top + bodyH * 0.36, w * 0.06, bodyH * 0.16, w * 0.02);
+      ctx.fill();
+      break;
+    }
+    case 7: { // terno preto
+      ctx.fillStyle = '#161a22';
+      roundRect(ctx, -w * 0.5, top + bodyH * 0.2, w, bodyH * 0.62, w * 0.16);
+      ctx.fill();
+      ctx.fillStyle = '#f4f7fb';
+      ctx.beginPath();
+      ctx.moveTo(-w * 0.16, top + bodyH * 0.2);
+      ctx.lineTo(0, top + bodyH * 0.46);
+      ctx.lineTo(w * 0.16, top + bodyH * 0.2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#a3212f';
+      ctx.beginPath();
+      ctx.moveTo(-w * 0.05, top + bodyH * 0.24);
+      ctx.lineTo(w * 0.05, top + bodyH * 0.24);
+      ctx.lineTo(0, top + bodyH * 0.56);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    }
+    case 8: { // terno branco
+      ctx.fillStyle = '#eef2f7';
+      roundRect(ctx, -w * 0.5, top + bodyH * 0.2, w, bodyH * 0.62, w * 0.16);
+      ctx.fill();
+      ctx.fillStyle = '#1b2130';
+      ctx.beginPath();
+      ctx.moveTo(-w * 0.16, top + bodyH * 0.2);
+      ctx.lineTo(0, top + bodyH * 0.44);
+      ctx.lineTo(w * 0.16, top + bodyH * 0.2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#2b3345';
+      ctx.beginPath();
+      ctx.moveTo(-w * 0.05, top + bodyH * 0.24);
+      ctx.lineTo(w * 0.05, top + bodyH * 0.24);
+      ctx.lineTo(0, top + bodyH * 0.54);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    }
+    case 9: { // parede
+      ctx.fillStyle = '#b06a4f';
+      ctx.fillRect(-w, top, w * 2, bodyH * 1.4);
+      ctx.strokeStyle = 'rgba(240, 220, 205, 0.75)';
+      ctx.lineWidth = Math.max(1.2, h * 0.022);
+      const bh = h * 0.075;
+      for (let y = top; y < top + bodyH * 1.2; y += bh) {
+        ctx.beginPath();
+        ctx.moveTo(-w, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+        const off = Math.round((y - top) / bh) % 2 ? w * 0.16 : 0;
+        for (let x = -w + off; x < w; x += w * 0.32) {
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x, y + bh);
+          ctx.stroke();
+        }
+      }
+      break;
+    }
+    default: break;
+  }
+  ctx.restore();
+}
+
+/** Visores: padrão + variantes (zangado, papel, óculos, tapa-olho...). */
+function drawVisorArt(ctx, art, o) {
+  const { w, h, top, pal } = o;
+  const vw = w * 0.68;
+  const vh = h * 0.30;
+  const vx = w * 0.02;
+  const vy = top + h * 0.16;
+  const tint = pal?.[1];
+  ctx.save();
+  if (art === 2) { // máscara de papel
+    ctx.fillStyle = '#f7f7f2';
+    roundRect(ctx, vx - vw * 0.08, vy - vh * 0.15, vw * 1.14, vh * 1.3, vh * 0.25);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(30,40,55,0.85)';
+    for (const dx of [0.22, 0.62]) {
+      ctx.beginPath();
+      ctx.ellipse(vx + vw * dx, vy + vh * 0.42, vw * 0.08, vh * 0.22, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(120,130,145,0.8)';
+    ctx.lineWidth = Math.max(1, h * 0.02);
+    ctx.beginPath();
+    ctx.moveTo(vx - vw * 0.06, vy + vh * 0.35);
+    ctx.lineTo(vx - vw * 0.2, vy + vh * 0.1);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+  if (art === 4) { // óculos escuros
+    ctx.fillStyle = 'rgba(18,22,30,0.95)';
+    roundRect(ctx, vx, vy + vh * 0.18, vw, vh * 0.66, vh * 0.22);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.28)';
+    roundRect(ctx, vx + vw * 0.12, vy + vh * 0.28, vw * 0.16, vh * 0.2, vh * 0.08);
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+  if (art === 8) { // óculos de coração
+    for (const dx of [0.26, 0.68]) {
+      const cx = vx + vw * dx;
+      const cy = vy + vh * 0.5;
+      const r = vh * 0.34;
+      ctx.fillStyle = '#e8324c';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy + r * 0.85);
+      ctx.bezierCurveTo(cx - r * 1.5, cy - r * 0.4, cx - r * 0.4, cy - r * 1.3, cx, cy - r * 0.45);
+      ctx.bezierCurveTo(cx + r * 0.4, cy - r * 1.3, cx + r * 1.5, cy - r * 0.4, cx, cy + r * 0.85);
+      ctx.fill();
+    }
+    ctx.restore();
+    return;
+  }
+  if (art === 6) { // óculos de corrida
+    ctx.fillStyle = 'rgba(20,26,34,0.9)';
+    roundRect(ctx, vx - vw * 0.04, vy + vh * 0.12, vw * 1.08, vh * 0.8, vh * 0.3);
+    ctx.fill();
+    for (const dx of [0.28, 0.7]) {
+      ctx.fillStyle = 'rgba(150,220,255,0.85)';
+      ctx.beginPath();
+      ctx.arc(vx + vw * dx, vy + vh * 0.52, vh * 0.26, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+    return;
+  }
+  if (art === 7) { // tapa-olho
+    drawVisorBase(ctx, vx, vy, vw, vh, h, tint);
+    ctx.fillStyle = '#171b23';
+    ctx.beginPath();
+    ctx.ellipse(vx + vw * 0.68, vy + vh * 0.5, vh * 0.44, vh * 0.4, -0.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#171b23';
+    ctx.lineWidth = Math.max(1.2, h * 0.022);
+    ctx.beginPath();
+    ctx.moveTo(vx - vw * 0.02, vy + vh * 0.24);
+    ctx.lineTo(vx + vw * 1.02, vy + vh * 0.62);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+  if (art === 9) { // visor alienígena
+    ctx.fillStyle = 'rgba(12, 26, 30, 0.92)';
+    roundRect(ctx, vx, vy, vw, vh, vh * 0.52);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(150, 255, 210, 0.92)';
+    for (const dx of [0.3, 0.66]) {
+      ctx.beginPath();
+      ctx.ellipse(vx + vw * dx, vy + vh * 0.5, vw * 0.11, vh * 0.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+    return;
+  }
+  drawVisorBase(ctx, vx, vy, vw, vh, h, tint);
+  if (art === 1) { // olhos zangados dentro do visor
+    ctx.strokeStyle = 'rgba(16, 24, 38, 0.88)';
+    ctx.lineWidth = Math.max(1.8, h * 0.034);
+    ctx.lineCap = 'round';
+    for (const [x1, y1, x2, y2] of [[0.18, 0.4, 0.44, 0.74], [0.82, 0.4, 0.56, 0.74]]) {
+      ctx.beginPath();
+      ctx.moveTo(vx + vw * x1, vy + vh * y1);
+      ctx.lineTo(vx + vw * x2, vy + vh * y2);
+      ctx.stroke();
+    }
+  } else if (art === 3) { // olhos de adesivo
+    for (const dx of [0.34, 0.66]) {
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(vx + vw * dx, vy + vh * 0.5, vh * 0.26, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#101820';
+      ctx.beginPath();
+      ctx.arc(vx + vw * dx + vh * 0.06, vy + vh * 0.56, vh * 0.11, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (art === 5) { // três olhos
+    ctx.fillStyle = 'rgba(15, 22, 32, 0.9)';
+    for (const [dx, dy, r] of [[0.3, 0.85, 0.2], [0.7, 0.85, 0.2], [0.5, 0.4, 0.16]]) {
+      ctx.beginPath();
+      ctx.ellipse(vx + vw * dx, vy + vh * dy, vw * r * 0.5, vh * r, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+function drawVisorBase(ctx, vx, vy, vw, vh, h, tint) {
+  const visorGrad = ctx.createLinearGradient(vx, vy, vx + vw, vy + vh);
+  visorGrad.addColorStop(0, tint ? shade(tint, 40) : '#dff6ff');
+  visorGrad.addColorStop(0.45, tint || '#9fdcea');
+  visorGrad.addColorStop(1, shade(tint || '#5fb6cc', -30));
+  ctx.fillStyle = visorGrad;
+  roundRect(ctx, vx, vy, vw, vh, vh * 0.52);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(10,30,45,0.55)';
+  ctx.lineWidth = Math.max(1, h * 0.026);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  roundRect(ctx, vx + vw * 0.16, vy + vh * 0.18, vw * 0.30, vh * 0.26, vh * 0.13);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.45)';
+  roundRect(ctx, vx + vw * 0.55, vy + vh * 0.55, vw * 0.22, vh * 0.16, vh * 0.08);
+  ctx.fill();
+}
+
+/** Placa de nome (nameplate) desenhada atrás do nome. */
+export function drawPlate(ctx, o) {
+  const { art = 0, pal, x, y, w, h, alpha = 1 } = o;
+  if (!art) return;
+  const p1 = pal?.[0] || '#2f6fd0';
+  const p2 = pal?.[1] || '#9fdcea';
+  ctx.save();
+  ctx.globalAlpha *= alpha;
+  const g = ctx.createLinearGradient(x - w / 2, y, x + w / 2, y);
+  if (art === 2) { g.addColorStop(0, p1); g.addColorStop(0.5, p2); g.addColorStop(1, p1); }
+  else if (art === 3) { g.addColorStop(0, '#3d0b12'); g.addColorStop(1, '#b3121f'); }
+  else if (art === 4) { g.addColorStop(0, '#f7c8d8'); g.addColorStop(1, '#b06a8f'); }
+  else if (art === 5) { g.addColorStop(0, '#0b1a33'); g.addColorStop(1, '#3b2a63'); }
+  else if (art === 6) { g.addColorStop(0, '#c2410c'); g.addColorStop(1, '#facc15'); }
+  else if (art === 7) { g.addColorStop(0, '#111827'); g.addColorStop(1, '#22d3ee'); }
+  else if (art === 8) { g.addColorStop(0, '#3f2a17'); g.addColorStop(1, '#8a6a44'); }
+  else { g.addColorStop(0, p1); g.addColorStop(1, p2); }
+  ctx.fillStyle = g;
+  roundRect(ctx, x - w / 2, y - h / 2, w, h, h / 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = Math.max(1, h * 0.08);
+  ctx.stroke();
+  ctx.restore();
 }
 
 /** Pets flutuando ao lado do jogador. */

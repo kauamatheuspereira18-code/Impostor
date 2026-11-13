@@ -1,6 +1,7 @@
 import { COLORS, MAPS } from '../shared/mapdata.js';
 import { GAME_CONSTANTS, DEFAULT_SETTINGS, MAP_SABOTAGES, SABOTAGE_INFO, ROLE_INFO, ABILITY, ABILITY_FIELDS } from '../shared/rules.js';
 import { makeShip } from './ship.js';
+import { HATS, SKINS, VISORS, PETS, PLATES } from '../shared/cosmetics.js';
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -67,8 +68,11 @@ export class Game {
       facing: 1,
       moving: false,
       isBot,
-      hat: clamp(Math.round(Number(cosmetics.hat) || 0), 0, 11),
-      pet: clamp(Math.round(Number(cosmetics.pet) || 0), 0, 4),
+      hat: clamp(Math.round(Number(cosmetics.hat) || 0), 0, HATS.length - 1),
+      skin: clamp(Math.round(Number(cosmetics.skin) || 0), 0, SKINS.length - 1),
+      visor: clamp(Math.round(Number(cosmetics.visor) || 0), 0, VISORS.length - 1),
+      pet: clamp(Math.round(Number(cosmetics.pet) || 0), 0, PETS.length - 1),
+      plate: clamp(Math.round(Number(cosmetics.plate) || 0), 0, PLATES.length - 1),
       alive: true,
       connected: true,
       role: null,
@@ -162,9 +166,14 @@ export class Game {
     for (let i = 0; i < need; i++) {
       const used = new Set([...this.players.values()].map((p) => p.name));
       const name = BOT_NAMES.filter((n) => !used.has(n))[0] || BOT_NAMES[i % BOT_NAMES.length];
-      const hat = Math.random() < 0.55 ? 1 + Math.floor(Math.random() * 11) : 0;
-      const pet = Math.random() < 0.4 ? 1 + Math.floor(Math.random() * 4) : 0;
-      this.addPlayer('bot_' + uid(), name, null, true, { hat, pet });
+      const cosmetics = {
+        hat: Math.random() < 0.55 ? 1 + Math.floor(Math.random() * (HATS.length - 1)) : 0,
+        skin: Math.random() < 0.45 ? 1 + Math.floor(Math.random() * (SKINS.length - 1)) : 0,
+        visor: Math.random() < 0.35 ? 1 + Math.floor(Math.random() * (VISORS.length - 1)) : 0,
+        pet: Math.random() < 0.4 ? 1 + Math.floor(Math.random() * (PETS.length - 1)) : 0,
+        plate: Math.random() < 0.3 ? 1 + Math.floor(Math.random() * (PLATES.length - 1)) : 0,
+      };
+      this.addPlayer('bot_' + uid(), name, null, true, cosmetics);
     }
     this.push();
   }
@@ -1463,7 +1472,10 @@ export class Game {
         name: shifted ? shifted.name : p.name,
         color: shifted ? shifted.color : p.color,
         hat: shifted ? shifted.hat : p.hat,
+        skin: shifted ? shifted.skin : p.skin,
+        visor: shifted ? shifted.visor : p.visor,
         pet: shifted ? shifted.pet : p.pet,
+        plate: shifted ? shifted.plate : p.plate,
         realName: revealRole ? p.name : undefined,
         displayName: shifted ? shifted.name : p.name,
         shifted: !!shifted,
