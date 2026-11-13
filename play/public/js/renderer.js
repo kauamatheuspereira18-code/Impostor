@@ -37,6 +37,16 @@ const PISO = {
   sala(id) {
     return this.porSala[id] || '#b0b5a9';
   },
+  // faixa colorida da parede, por sala (como os frisos do original)
+  friso: {
+    Cafeteria: '#b0476d', Admin: '#b0476d', Comms: '#b0476d', Weapons: '#b0476d',
+    MedBay: '#3f87a6', Nav: '#3f87a6', Shields: '#3f87a6', LifeSupp: '#3f87a6',
+    Electrical: '#b58a3c', UpperEngine: '#b58a3c', LowerEngine: '#b58a3c',
+    Reactor: '#43a377', Security: '#8aa0b8', Storage: '#8aa0b8',
+  },
+  frisoDa(id) {
+    return this.friso[id] || '#8aa0b8';
+  },
 };
 
 export class Renderer {
@@ -217,6 +227,8 @@ export class Renderer {
     for (const space of spaces) this.fillPlanWorld(space.shapes, PISO.sala(space.id));
     this.drawFloorTiles(todas);
     this.drawSceneVignette();
+    // friso colorido de cada sala (aparece como um fio na borda externa da parede)
+    for (const space of spaces) this.strokeWallAccent(space.shapes, z, PISO.frisoDa(space.id));
     // paredes: corredores com parede fina, salas com parede cheia
     this.strokePlanOutline(corridors, z, true);
     this.strokePlanOutline(spaces, z);
@@ -266,6 +278,27 @@ export class Renderer {
         for (const c of t.consoles) this.drawTaskMarker(c);
       }
     }
+  }
+
+  /** Fio colorido na borda externa da parede (friso da sala). */
+  strokeWallAccent(shapes, z, color) {
+    const { ctx } = this;
+    ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.85;
+    ctx.lineWidth = 0.60 * z;
+    ctx.beginPath();
+    for (const shape of shapes || []) {
+      (shape.points || []).forEach(([x, y], i) => {
+        const q = this.worldToScreen(x, y);
+        i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y);
+      });
+      ctx.closePath();
+    }
+    ctx.stroke();
+    ctx.restore();
   }
 
   /** Casco: silhueta convexa em volta de todas as salas e corredores. */
