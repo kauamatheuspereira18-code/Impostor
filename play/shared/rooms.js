@@ -51,38 +51,38 @@ export const ROOM_PLANS = [
   {
     id: 'Shields',
     name: 'Escudos',
-    shapes: [poly([7.6, -16.6], [13.4, -16.6], [13.4, -11.8], [7.6, -11.8])],
+    shapes: [poly([8.4, -18.4], [14.2, -18.4], [14.2, -13.2], [8.4, -13.2])],
     anchors: { consoleRoom: true, vents: ['ShieldsVent'] },
   },
   {
     id: 'Comms',
     name: 'Comunicações',
-    shapes: [poly([3.6, -15.6], [7.6, -15.6], [7.6, -10.8], [3.6, -10.8])],
+    shapes: [poly([2.6, -18.2], [7.4, -18.2], [7.4, -13.4], [2.6, -13.4])],
     anchors: {},
   },
   {
     id: 'Admin',
     name: 'Administração',
     // sala em L, com o mapa da nave na parede
-    shapes: [poly([0.6, -11.2], [6.4, -11.2], [6.4, -5.6], [1.8, -5.6], [1.8, -7.0], [0.6, -7.0])],
+    shapes: [poly([1.9, -11.0], [6.6, -11.0], [6.6, -5.4], [1.9, -5.4])],
     anchors: { consoleRoom: true, vents: ['AdminVent'] },
   },
   {
     id: 'Storage',
     name: 'Armazém',
-    shapes: [poly([-4.6, -14.8], [3.2, -14.8], [3.2, -7.2], [-4.6, -7.2])],
+    shapes: [poly([-5.4, -15.0], [1.6, -15.0], [1.6, -6.8], [-5.4, -6.8])],
     anchors: { consoleRoom: true },
   },
   {
     id: 'Electrical',
     name: 'Elétrica',
-    shapes: [poly([-10.6, -9.4], [-4.6, -9.4], [-4.6, -5.4], [-10.6, -5.4])],
+    shapes: [poly([-10.6, -9.4], [-4.6, -9.4], [-4.6, -6.6], [-10.6, -6.6])],
     anchors: { consoleRoom: true, vents: ['ElecVent'] },
   },
   {
     id: 'MedBay',
     name: 'Enfermaria',
-    shapes: [poly([-11.6, -6.4], [-5.0, -6.4], [-5.0, -2.6], [-11.6, -2.6])],
+    shapes: [poly([-11.6, -5.0], [-5.0, -5.0], [-5.0, -2.6], [-11.6, -2.6])],
     anchors: { consoleRoom: true, vents: ['MedVent'] },
   },
   {
@@ -118,22 +118,22 @@ export const ROOM_PLANS = [
 /* Corredores: cada um é uma faixa (ou conjunto de faixas) de chão.    */
 /* ------------------------------------------------------------------ */
 export const CORRIDOR_PLANS = [
-  { id: 'hallWest', shapes: [rect(-15.4, 0.6, -7.6, 2.6), rect(-18.6, 0.6, -15.4, 2.6)] },
-  { id: 'hallWestToMed', shapes: [rect(-12.0, -3.0, -8.6, -0.2)] },
-  { id: 'hallCafeToMed', shapes: [rect(-9.2, -2.6, -7.0, -1.2)] },
+  { id: 'hallWest', shapes: [rect(-18.6, 0.9, -7.6, 2.7)] },
+  { id: 'hallWestToMed', shapes: [rect(-12.0, -3.0, -8.6, 0.0)] },
+  { id: 'hallCafeToMed', shapes: [rect(-9.2, -2.6, -7.0, 0.0)] },
   { id: 'hallSecurity', shapes: [rect(-14.6, -4.6, -11.4, -2.6)] },
   { id: 'hallReactorUpper', shapes: [rect(-20.4, -1.6, -18.2, 2.6)] },
-  { id: 'hallReactorLower', shapes: [rect(-20.4, -11.6, -18.2, -6.0)] },
-  { id: 'hallSecurityLow', shapes: [rect(-17.2, -10.2, -11.0, -8.2)] },
-  { id: 'hallCentral', shapes: [rect(-1.8, -7.2, 1.2, -2.6)] },
-  { id: 'hallAdmin', shapes: [rect(4.4, -5.6, 6.0, -2.6)] },
+  { id: 'hallReactorLower', shapes: [rect(-20.4, -11.4, -18.2, -6.2)] },
+  { id: 'hallSecurityLow', shapes: [rect(-17.2, -10.0, -11.0, -8.4)] },
+  { id: 'hallCentral', shapes: [rect(-1.4, -7.4, 0.6, -2.4)] },
+  { id: 'hallAdmin', shapes: [rect(4.6, -5.6, 6.0, -2.4)] },
   { id: 'hallElec', shapes: [rect(-8.0, -6.4, -6.0, -4.6), rect(-7.2, -10.6, -5.4, -8.6)] },
   { id: 'hallCafeToLife', shapes: [rect(5.4, -1.4, 7.4, -0.6)] },
   { id: 'hallWeapons', shapes: [rect(6.2, 1.0, 8.6, 2.8)] },
-  { id: 'hallEast', shapes: [rect(8.4, -6.2, 13.8, -4.2)] },
+  { id: 'hallEast', shapes: [rect(8.4, -6.8, 13.8, -4.2)] },
   { id: 'hallNav', shapes: [rect(12.6, -4.2, 15.0, -2.2)] },
   { id: 'hallLifeSupp', shapes: [rect(7.4, -4.6, 8.4, -1.4)] },
-  { id: 'hallStorageEngine', shapes: [rect(-15.4, -14.6, -4.6, -11.0)] },
+  { id: 'hallStorageEngine', shapes: [rect(-15.4, -14.0, -4.6, -12.2)] },
   { id: 'hallStorageSouth', shapes: [rect(-2.6, -11.0, 0.4, -8.6)] },
   { id: 'hallStorageComms', shapes: [rect(-1.2, -12.4, 3.9, -10.6)] },
   { id: 'hallShieldsStorage', shapes: [rect(3.2, -13.6, 6.4, -11.8)] },
@@ -169,11 +169,11 @@ export const ROOM_PROPS = {
   ],
   Shields: [
     { type: 'shieldGen', x: 11.4, y: -15.2, r: 1.2 },
-    { type: 'crate', x: 12.6, y: -12.6, w: 0.9, h: 0.9 },
+    { type: 'crate', x: 13.4, y: -13.9, w: 0.9, h: 0.9 },
     { type: 'window', x: 13.2, y: -14.2, w: 0.35, h: 3.2 },
   ],
   Comms: [
-    { type: 'panel', x: 7.2, y: -12.2, w: 0.7, h: 1.6 },
+    { type: 'panel', x: 6.9, y: -15.8, w: 0.7, h: 1.6 },
     { type: 'chair', x: 5.4, y: -14.9 },
   ],
   Admin: [
@@ -184,18 +184,18 @@ export const ROOM_PROPS = {
   Storage: [
     { type: 'crate', x: -3.6, y: -13.6, w: 1.2, h: 1.2 },
     { type: 'crate', x: -2.0, y: -14.0, w: 1.0, h: 1.0 },
-    { type: 'crate', x: 1.6, y: -13.4, w: 1.2, h: 1.2 },
+    { type: 'crate', x: 0.9, y: -13.1, w: 1.1, h: 1.1 },
     { type: 'crate', x: 2.2, y: -11.6, w: 0.9, h: 0.9 },
     { type: 'crate', x: -3.9, y: -8.4, w: 1.0, h: 1.0 },
   ],
   Electrical: [
-    { type: 'panel', x: -8.6, y: -5.9, w: 1.3, h: 0.45 },
+    { type: 'panel', x: -7.0, y: -6.9, w: 1.1, h: 0.4 },
     { type: 'crate', x: -5.2, y: -8.9, w: 0.9, h: 0.9 },
   ],
   MedBay: [
     { type: 'bed', x: -9.6, y: -3.2, w: 1.5, h: 0.9 },
     { type: 'bed', x: -7.2, y: -3.2, w: 1.5, h: 0.9 },
-    { type: 'panel', x: -6.0, y: -5.6, w: 1.5, h: 0.4 },
+    { type: 'panel', x: -10.9, y: -4.7, w: 1.0, h: 0.4 },
   ],
   Security: [
     { type: 'table', x: -14.2, y: -5.8, r: 0.8 },
