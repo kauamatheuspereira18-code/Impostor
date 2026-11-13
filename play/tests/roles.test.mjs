@@ -266,7 +266,68 @@ console.log('[12] catálogo de cosméticos oficial');
   check('índices grandes continuam seguros no serialize', !!g2.serialize('h').players.find((x) => x.id === 'h'));
 }
 
-console.log('[13] configurações de papéis');
+console.log('[13] bots usando habilidades');
+{
+  const g = newGame();
+  const crew = [...g.players.values()].filter((p) => p.role === 'crew' && p.isBot);
+  const imps = [...g.players.values()].filter((p) => p.role === 'impostor' && p.isBot);
+  const now = Date.now();
+
+  // metamorfo
+  const shifter = imps[0];
+  setRole(shifter, 'Shapeshifter', 'impostor');
+  shifter.abilityReadyAt = 0;
+  crew.forEach((c, i) => { c.x = shifter.x + 1 + i * 0.05; c.y = shifter.y; });
+  g.botAbilities(shifter, now);
+  check('metamorfo bot se transforma com testemunha perto', !!shifter.shiftTo, String(shifter.shiftTo));
+  check('os outros veem o bot transformado', g.serialize(crew[0].id).players.find((p) => p.id === shifter.id).shifted === true);
+
+  // fantasma
+  const phantom = imps[1];
+  setRole(phantom, 'Phantom', 'impostor');
+  phantom.abilityReadyAt = 0;
+  phantom.killReadyAt = now + 5000;
+  crew[0].x = phantom.x + 1;
+  crew[0].y = phantom.y;
+  g.botAbilities(phantom, now);
+  check('fantasma bot fica invisível sem poder matar', phantom.phantomUntil > now);
+
+  // rastreador
+  const tracker = crew.find((p) => p.roleType !== 'Engineer');
+  setRole(tracker, 'Tracker', 'crew');
+  tracker.abilityReadyAt = 0;
+  const usos = tracker.trackerUses;
+  g.botAbilities(tracker, now);
+  check('rastreador bot marca alguém', tracker.tracked.length === 1 && tracker.trackerUses === usos - 1, `marcas=${tracker.tracked.length}`);
+
+  // engenheiro viaja pelo duto
+  const eng = crew.filter((p) => p.id !== tracker.id)[0];
+  setRole(eng, 'Engineer', 'crew');
+  eng.abilityReadyAt = 0;
+  const vent = g.ship.data.vents[0];
+  eng.x = vent.x;
+  eng.y = vent.y;
+  eng.botState.goal = { x: vent.x + 20, y: vent.y + 20, type: 'task', taskKey: null };
+  g.botAbilities(eng, now);
+  check('engenheiro bot entra no duto para encurtar caminho', eng.inVent === true && !!eng.botState.ventTrip, `inVent=${eng.inVent}`);
+  const trip = eng.botState.ventTrip;
+  g.tickBots(0.05, trip.nextAt + 1);
+  check('engenheiro bot se move no duto', eng.inVent === true, `inVent=${eng.inVent}`);
+  g.tickBots(0.05, (eng.botState.ventTrip?.nextAt || now) + 1);
+  g.tickBots(0.05, (eng.botState.ventTrip?.nextAt || now) + 1);
+  check('engenheiro bot sai do duto no fim', eng.inVent === false, `inVent=${eng.inVent}`);
+
+  // anjo da guarda morto
+  const ga = crew.filter((p) => ![tracker.id, eng.id].includes(p.id))[0];
+  setRole(ga, 'Guardian Angel', 'crew');
+  ga.alive = false;
+  ga.abilityReadyAt = 0;
+  g.botAbilities(ga, Date.now());
+  const protegido = [...g.players.values()].find((p) => (p.shieldUntil || 0) > Date.now());
+  check('anjo da guarda bot protege quem está exposto', !!protegido, protegido?.name);
+}
+
+console.log('[14] configurações de papéis');
 {
   const g = newGame();
   g.setSettings({ roles: { engineer: 9, phantom: 2.4, shapeshifter: '2' } });

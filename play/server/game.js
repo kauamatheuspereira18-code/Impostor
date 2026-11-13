@@ -372,7 +372,6 @@ export class Game {
         p.shiftTo = target.id;
         p.shiftUntil = now + ability.shift * 1000;
         p.abilityReadyAt = now + ability.cooldown * 1000;
-        this.log.push({ type: 'system', text: `${p.name} se transformou.` });
         break;
       }
       case 'Phantom': {
@@ -546,7 +545,6 @@ export class Game {
       // engenheiro só pode ficar 5s no duto
       if (p.inVent && p.roleType === 'Engineer' && p.ventEnteredAt && now - p.ventEnteredAt > this.ability('ventTime') * 1000) {
         this.exitVent(p.id);
-        this.log.push({ type: 'system', text: `${p.name} saiu do duto no limite.` });
       }
       // bateria do cientista
       if (p.roleType === 'Scientist') {
@@ -718,7 +716,7 @@ export class Game {
     if (killer.isBot) killer.killReadyAt = Date.now() + Math.max(9000, this.settings.killCooldown * 550);
     if (target.roleType === 'Noisemaker') {
       this.noiseAlarms.push({ x: target.x, y: target.y, at: Date.now(), until: Date.now() + 5000, name: target.name });
-      this.log.push({ type: 'system', text: `ALARME: ${target.name} era o Barulhento!` });
+      this.log.push({ type: 'system', text: `Alarme disparado em ${this.ship.roomAt(target.x, target.y) || 'lugar nenhum'}!` });
     }
     this.bodies.push({
       id: 'body_' + uid(5),
@@ -1174,12 +1172,34 @@ export class Game {
     for (const p of this.players.values()) {
       if (!p.isBot) continue;
       if (!p.alive) {
+        if (p.roleType === 'Guardian Angel') this.botAbilities(p, now);
         // como no jogo, o fantasma continua terminando as tarefas
         if (p.role === 'crew' && this.settings.ghostsDoTasks) this.tickGhostBot(p, dt, now);
         continue;
       }
       const bs = p.botState;
-      if (p.inVent) { this.exitVent(p.id); continue; }
+      if (p.inVent) {
+        // engenheiro bot: atravessa o duto antes de sair
+        if (bs.ventTrip) {
+          if (now >= bs.ventTrip.nextAt) {
+            if (bs.ventTrip.hops > 0) {
+              this.moveVent(p.id, 1);
+              bs.ventTrip.hops -= 1;
+              bs.ventTrip.nextAt = now + 700;
+            } else {
+              this.exitVent(p.id);
+              bs.ventTrip = null;
+              bs.goal = null;
+              bs.path = null;
+            }
+          }
+          continue;
+        }
+        this.exitVent(p.id);
+        continue;
+      }
+
+      this.botAbilities(p, now);
 
       if (!bs.goal) {
         bs.goal = this.pickBotGoal(p, now);
@@ -1291,6 +1311,89 @@ export class Game {
       }
       bs.goal = null;
       bs.idleUntil = now + rand(60, 220);
+    }
+  }
+
+  /** Distância do impostor vivo mais próximo (para decisões de bot). */
+  impostorThreat(target) {
+    const imps = [...this.players.values()].filter((x) => x.alive && x.role === 'impostor');
+    return imps.length ? Math.min(...imps.map((i) => dist(i, target))) : 999;
+  }
+
+  /** Bots também usam as habilidades dos papéis, como um humano faria. */
+  botAbilities(p, now) {
+    const bs = p.botState;
+    const type = p.roleType;
+    const ready = now >= (p.abilityReadyAt || 0);
+
+    // anjo da guarda morto: protege quem está mais exposto
+    if (!p.alive) {
+      if (type !== 'Guardian Angel' || !ready) return;
+      const alvo = [...this.players.values()]
+        .filter((x) => x.alive && x.role === 'crew' && (x.shieldUntil || 0) < now)
+        .sort((a, b) => this.impostorThreat(a) - this.impostorThreat(b))[0];
+      if (alvo) this.useAbility(p.id, 'Guardian Angel', alvo.id);
+      return;
+    }
+    if (!ready) return;
+
+    const crewPerto = (r) => [...this.players.values()]
+      .filter((x) => x.alive && x.role === 'crew' && dist(p, x) <= r);
+    const killPronto = now >= (p.killReadyAt || 0);
+
+    // impostor (qualquer papel) usa o duto para encurtar caminho sem ser visto
+    if (p.role === 'impostor' && bs.goal && dist(p, bs.goal) > 7 && !bs.ventTrip) {
+      const vent = this.ship.data.vents.find((v) => dist(p, v) < 1.5);
+      if (vent && Math.random() < 0.35) {
+        const res = this.enterVent(p.id, vent.id);
+        if (res.ok) {
+          bs.ventTrip = { hops: 1 + Math.floor(Math.random() * 2), nextAt: now + 700 };
+          bs.path = null;
+          bs.goal = null;
+          return;
+        }
+      }
+    }
+
+    switch (type) {
+      case 'Phantom': {
+        // fica invisível quando tem testemunha e não pode matar agora
+        if (!killPronto && crewPerto(4.5).length) this.useAbility(p.id, 'Phantom');
+        break;
+      }
+      case 'Shapeshifter': {
+        // imita um tripulante longe antes de atacar alguém por perto
+        const perto = crewPerto(6);
+        if (!perto.length) break;
+        const alvo = [...this.players.values()]
+          .filter((x) => x.alive && x.role === 'crew' && !perto.includes(x))
+          .sort((a, b) => dist(b, p) - dist(a, p))[0] || perto[0];
+        if (alvo) this.useAbility(p.id, 'Shapeshifter', alvo.id);
+        break;
+      }
+      case 'Tracker': {
+        const alvo = [...this.players.values()]
+          .filter((x) => x.alive && x.id !== p.id)
+          .sort((a, b) => dist(a, p) - dist(b, p))[0];
+        if (alvo && (p.trackerUses || 0) > 0) this.useAbility(p.id, 'Tracker', alvo.id);
+        break;
+      }
+      case 'Engineer': {
+        // usa o duto para encurtar caminho quando o objetivo está longe
+        const vent = this.ship.data.vents.find((v) => dist(p, v) < 1.5);
+        const objetivoLonge = bs.goal && dist(p, bs.goal) > 7;
+        if (vent && objetivoLonge && !bs.ventTrip) {
+          const res = this.enterVent(p.id, vent.id);
+          if (res.ok) {
+            bs.ventTrip = { hops: 1 + Math.floor(Math.random() * 2), nextAt: now + 700 };
+            bs.path = null;
+            bs.goal = null;
+          }
+        }
+        break;
+      }
+      default:
+        break;
     }
   }
 

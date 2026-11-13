@@ -802,7 +802,7 @@ function renderHud(st) {
     C.lastAlarmAt = lastAlarm.at;
     sfx.startAlarm?.();
     setTimeout(() => sfx.stopAlarm?.(), 1400);
-    toast(`Alarme do Barulhento: ${lastAlarm.name}`);
+    toast('Alarme disparado — alguém do time caiu!');
   }
 
   // papel

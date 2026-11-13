@@ -61,6 +61,7 @@ A partida é autoritativa no servidor, então todos veem a mesma coisa.
 | **Animação** | Caminhada com pernas alternadas, mochila, viseira com reflexo, tremor de câmera no abate, respingos, duto abrindo, portas deslizando, visão em círculo. |
 | **Geometria** | 14 salas com planta própria (octógono na Cafeteria, canto cortado em Armas, bico na Navegação, Armazém em L) e 21 corredores ligados de acordo com o mapa clássico, colisão por polígono. |
 | **Tarefas visuais** | Scan na Enfermaria, tiros de asteroide em Armas e anéis em Escudos aparecem para todos, como no jogo. |
+| **Bots com papéis** | Bots usam as habilidades: Metamorfo se disfarça antes de atacar, Fantasma desaparece quando há testemunha, Engenheiro atravessa dutos, Rastreador marca alvos, Anjo da Guarda protege quem está exposto e todo impostor usa dutos para se locomover. |
 | **Papéis** | Até 3 impostores com Metamorfo e Fantasma; tripulantes com Engenheiro, Cientista, Barulhento, Rastreador, Anjo da Guarda ou sem papel. Configurável de 0 a 3 de cada no lobby. |
 | **Cosméticos** | Catálogo oficial completo extraído de `Cosmetics.json`: **584 chapéus, 215 trajes, 185 visores, 166 placas de nome e 53 pets**. Traje, visor, chapéu, pet e placa são escolhidos na tela inicial; o Metamorfo copia tudo junto com cor e nome. |
 | **Habilidades** | Botão de habilidade com recarga em anel, escolha de alvo, transformação com faíscas, invisibilidade, veneno, escudo, marcações no mapa, vitais com bateria e alarme do Barulhento. |
@@ -83,7 +84,7 @@ node tests/new_game.test.mjs     # socket: lobby, tarefas, sabotagem, reunião e
 node tests/crewwin.test.mjs      # vitória dos tripulantes
 node tests/taskwin.test.mjs      # vitória por tarefas (com fantasma terminando as dele)
 node tests/fidelity.test.mjs     # abate, tarefa de fantasma, portas, O₂, ejeção
-node tests/roles.test.mjs        # 7 papéis + tempos ajustáveis + cópia perfeita do metamorfo
+node tests/roles.test.mjs        # papéis, tempos ajustáveis, cópia do metamorfo, cosméticos e bots com habilidades
 node tests/fullgame2.test.mjs    # partida completa só com bots
 node tests/online.test.mjs       # criar/entrar/lista pública/reconexão/kick (servidor rodando)
 ```
@@ -172,8 +173,6 @@ Comparado ao cliente oficial, ainda não estão aqui:
 
 - **Outros mapas**: por escolha de escopo, o jogo fica só no **The Skeld** clássico; a
   geometria dos demais não é usada.
-- **Bots usando habilidades**: os bots recebem papéis, mas não acionam Metamorfo/Fantasma
-  nem o escudo do Anjo — só matam, fazem tarefas, reportam e votam.
 - **Arte dos cosméticos**: os itens gratuitos e os mais icônicos têm desenho dedicado; o resto
   do catálogo usa desenho procedural determinístico (mesma silhueta/paleta por id), porque os
   textures/sprites originais não estão nos dados textuais do repositório.
