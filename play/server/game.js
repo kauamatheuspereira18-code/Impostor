@@ -1708,6 +1708,10 @@ export class Game {
       taskProgress: this.state === 'ended' ? liveProgress : undefined,
       winner: this.winner,
       gameOverReason: this.gameOverReason,
+      impostorsAlive: this.settings.confirmImpostor
+        ? [...this.players.values()].filter((p) => p.alive && p.role === 'impostor').length
+        : null,
+      impostorsTotal: this.settings.confirmImpostor ? this.settings.numImpostors : null,
       emergencyUsed: this.emergencyUsed,
       emergencyLeft: this.settings.emergencyMeetings - this.emergencyUsed,
       sabotageReadyAt: this.sabotageReadyAt,

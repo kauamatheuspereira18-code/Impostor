@@ -46,6 +46,7 @@ const C = {
   lastFootstep: 0,
   taskPulse: 0,
   ejectTimer: null,
+  cues: { killReady: null, abilityReady: null, shields: new Set(), shifts: new Set(), hidden: new Set(), tracked: '', sabotage: false, tasksDone: false },
 };
 
 const renderer = new Renderer($('gameCanvas'));
@@ -90,6 +91,8 @@ function saveSession(res) {
 window.__state = () => C.state;
 window.__openSpecial = (kind) => openSpecial(kind);
 window.__testMove = (x, y) => { C.local.x = x; C.local.y = y; socket.emit('move', { x, y }); };
+window.__eject = (m) => showEject(m);
+window.__audioCues = (st) => audioCues(st);
 
 socket.on('hello', (info) => {
   C.info = info;
@@ -308,8 +311,83 @@ $('btnLeave').addEventListener('click', () => {
   refreshGames();
 });
 
+document.addEventListener('mouseover', (e) => {
+  const alvo = e.target?.closest?.('.btn, .action-btn, .hud-chip, .preset-btn, .vote-card, .ability-target');
+  if (alvo && alvo !== C.lastHover) {
+    C.lastHover = alvo;
+    if (sfx.ctx) sfx.hover();
+  }
+});
+
 $('btnHelp').addEventListener('click', () => $('helpModal').removeAttribute('hidden'));
+
+// banco de sons do help: toca cada efeito para conferir o áudio do navegador
+$('soundBoard')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.sound-btn');
+  if (!btn) return;
+  sfx.init();
+  const nome = btn.dataset.sound;
+  if (typeof sfx[nome] === 'function') sfx[nome](true);
+});
 $('helpClose').addEventListener('click', () => $('helpModal').setAttribute('hidden', ''));
+
+let previousAlive = true;
+
+/** Sons contínuos: cooldowns prontos, escudo, transformação, marcações, tarefas. */
+function audioCues(st) {
+  if (!st?.you) return;
+  const now = st.now || Date.now(); // relógio do servidor, para bater com os cooldowns
+  const cues = C.cues;
+
+  // kill pronto
+  if (st.you.role === 'impostor' && st.you.alive) {
+    const ready = now >= (st.you.killReadyAt || 0);
+    if (ready && cues.killReady === false) sfx.killReady();
+    cues.killReady = ready;
+  } else {
+    cues.killReady = null;
+  }
+
+  // habilidade pronta
+  const especial = st.you.roleType && !['Crewmate', 'Impostor'].includes(st.you.roleType);
+  if (especial && st.you.alive) {
+    const ready = now >= (st.you.abilityReadyAt || 0);
+    if (ready && cues.abilityReady === false) sfx.abilityReady();
+    cues.abilityReady = ready;
+  } else {
+    cues.abilityReady = null;
+  }
+
+  // efeitos visíveis nos outros (escudo e transformação)
+  for (const p of st.players) {
+    if (p.id === st.you.id) continue;
+    if (p.shielded && !cues.shields.has(p.id)) { cues.shields.add(p.id); sfx.shield(); }
+    if (!p.shielded) cues.shields.delete(p.id);
+    if (p.shifted && !cues.shifts.has(p.id)) { cues.shifts.add(p.id); sfx.shift(); }
+    if (!p.shifted) cues.shifts.delete(p.id);
+  }
+
+  // alguém sumiu perto de mim (fantasma)
+  const eu = st.players.find((p) => p.id === st.you.id);
+  for (const p of st.players) {
+    if (p.id === st.you.id) continue;
+    const perto = !!eu && Math.hypot((p.x || 0) - eu.x, (p.y || 0) - eu.y) < 11;
+    if (p.hidden && perto && !cues.hidden.has(p.id)) { cues.hidden.add(p.id); sfx.phantom(); }
+    if (!p.hidden) cues.hidden.delete(p.id);
+  }
+
+  // marcações do rastreador
+  const ids = (st.you.tracked || []).map((t) => t.id).join(',');
+  if (ids && ids !== cues.tracked) sfx.track();
+  cues.tracked = ids;
+
+  // barra de tarefas completa
+  if (st.taskBar && st.taskBar.total) {
+    const done = st.taskBar.done >= st.taskBar.total;
+    if (done && !cues.tasksDone && st.state === 'tasks') sfx.allTasks();
+    cues.tasksDone = done;
+  }
+}
 
 function showScreen(name) {
   for (const s of ['home', 'lobby', 'game']) {
@@ -331,7 +409,12 @@ socket.on('state', (state) => {
     sfx.startAmbient();
   }
   if (state.state === 'tasks' && prev?.state !== 'tasks') {
-    sfx.startAlarm && sfx.stopAlarm();
+    // o zumbido do casco volta quando a rodada recomeça
+    sfx.stopAlarm();
+    sfx.startAmbient();
+  } else if (state.state !== 'tasks' && prev?.state === 'tasks') {
+    sfx.stopAmbient();
+    if (state.state === 'meeting') sfx.stopAlarm();
   }
   if (state.lastKill && state.lastKill.at !== C.lastKillAt) {
     C.lastKillAt = state.lastKill.at;
@@ -343,7 +426,9 @@ socket.on('state', (state) => {
         { x: state.lastKill.x, y: state.lastKill.y, color: state.lastKill.victimColor },
         killerP ? { x: killerP.x, y: killerP.y } : null,
       );
-      if (state.you.role === 'impostor' || d < 6.5) sfx.kill();
+      // impostor ouve o abate cheio; quem está perto ouve mais alto que quem está longe
+      if (state.you.role === 'impostor') sfx.kill(1);
+      else if (d < 16) sfx.kill(Math.max(0.15, 1 - d / 16));
     }
   }
   if (state.state === 'meeting' && prev?.state !== 'meeting') {
@@ -358,11 +443,22 @@ socket.on('state', (state) => {
     sfx.stopAmbient();
   }
   if (state.sabotage) {
+    C.cues.sabotage = true;
     if (state.sabotage.type === 'reactor' || state.sabotage.type === 'o2') sfx.startAlarm();
     else sfx.stopAlarm();
   } else {
+    if (C.cues.sabotage) sfx.fixed();
+    C.cues.sabotage = false;
     sfx.stopAlarm();
   }
+
+  // morri agora: som de fantasma (diferente do abate)
+  const meNow = state.players.find((p) => p.id === state.you.id);
+  const aliveNow = !!meNow?.alive;
+  if (previousAlive && !aliveNow) sfx.ghost();
+  previousAlive = aliveNow;
+
+  audioCues(state);
   document.body.classList.toggle(
     'sab-critical',
     !!state.sabotage && ['reactor', 'o2'].includes(state.sabotage.type) && state.state === 'tasks',
@@ -394,7 +490,7 @@ socket.on('state', (state) => {
   if (state.state === 'meeting' && state.meeting?.done) showEject(state.meeting);
   if (state.state !== 'meeting' && !$('ejectOverlay').hidden && !state.meeting) {
     // a cinemática some sozinha, mas garante que não fique presa
-    if (Date.now() - C.lastEjectAt > 4200) $('ejectOverlay').hidden = true;
+    if (Date.now() - (C.lastEjectLocal || 0) > 4200) $('ejectOverlay').hidden = true;
   }
   renderHud(state);
   renderMeeting(state);
@@ -1371,6 +1467,7 @@ $('btnSabotage').addEventListener('click', () => {
 $('sabClose').addEventListener('click', () => $('sabotageModal').setAttribute('hidden', ''));
 
 $('btnEmergency').addEventListener('click', () => {
+  sfx.emergency();
   socket.emit('emergency', (res) => {
     if (res?.error) return toast(res.error);
     flashScreen('red', 320);
@@ -1393,7 +1490,14 @@ function emitAbility(targetId) {
     if (you.roleType === 'Scientist') openSpecial('MedBay');
     else if (you.roleType === 'Phantom') toast('Você ficou invisível.');
     else if (you.roleType === 'Shapeshifter') toast('Transformação ativa.');
-    sfx.click();
+    const som = {
+      Phantom: () => sfx.phantom(),
+      Shapeshifter: () => sfx.shift(),
+      'Guardian Angel': () => sfx.shield(),
+      Tracker: () => sfx.track(),
+      Engineer: () => sfx.vent(),
+    }[you.roleType];
+    som ? som() : sfx.click();
   });
 }
 
@@ -1525,6 +1629,12 @@ function renderMeeting(st) {
   // anel/barra de tempo da fase (discussão ou votação)
   const totalMs = ((isVoting ? st.settings.votingTime : st.settings.discussionTime) || 0) * 1000;
   const leftMs = Math.max(0, (isVoting ? m.votingUntil : m.discussionUntil) - now);
+  if (isVoting && left > 0 && left <= 5 && C.lastTickLeft !== left) {
+    C.lastTickLeft = left;
+    sfx.tick();
+  }
+  if (!isVoting) C.lastTickLeft = null;
+
   const clock = document.querySelector('.meeting-clock');
   if (clock) {
     clock.style.setProperty('--t', totalMs ? ((1 - leftMs / totalMs) * 100).toFixed(1) : '0');
@@ -1603,6 +1713,9 @@ function renderChat(st) {
   const lines = (st.log || []).filter((l) => l.type === 'chat');
   const sig = lines.map((l) => l.text).join('|');
   if (log.dataset.sig === sig) return;
+  const anterior = Number(log.dataset.count || 0);
+  if (log.dataset.sig !== undefined && lines.length > anterior) sfx.chat();
+  log.dataset.count = String(lines.length);
   log.dataset.sig = sig;
   log.innerHTML = '';
   for (const line of lines) {
@@ -1798,6 +1911,16 @@ function flashScreen(kind = '', ms = 180) {
 function showEject(meeting) {
   if (!meeting || C.lastEjectAt === meeting.doneAt) return;
   C.lastEjectAt = meeting.doneAt;
+
+  C.lastEjectLocal = Date.now();
+  const semEjeção = meeting.tie || !meeting.ejectedId;
+  if (semEjeção) {
+    // como no jogo original: sem cena espacial quando ninguém sai da nave
+    sfx.denied();
+    toast(meeting.tie ? 'Empate! Ninguém foi ejetado.' : 'Ninguém foi ejetado.');
+    return;
+  }
+
   renderer.shake(9, 520);
   flashScreen('red', 220);
   const overlay = $('ejectOverlay');
@@ -1809,31 +1932,60 @@ function showEject(meeting) {
   void crew.offsetWidth;
   crew.style.animation = '';
   overlay.hidden = false;
+  overlay.classList.remove('fade', 'result');
   sfx.eject();
+
   const text = $('ejectText');
   const sub = $('ejectSub');
+  text.textContent = `${meeting.ejectedName || '???'} foi ejetado.`;
   sub.className = 'eject-sub';
-  if (meeting.tie) {
-    text.textContent = 'Empate!';
-    sub.textContent = 'Ninguém foi ejetado.';
-    sub.classList.add('crew');
-  } else if (!meeting.ejectedId) {
-    text.textContent = 'Ninguém foi ejetado.';
-    sub.textContent = 'A tripulação pulou o voto.';
-    sub.classList.add('crew');
-  } else {
-    text.textContent = `${meeting.ejectedName || '???'} foi ejetado.`;
+  sub.textContent = '';
+  $('ejectCaption').classList.remove('show');
+
+  // silêncio no vácuo: só o casco girando, depois o veredito
+  clearTimeout(C.ejectResultTimer);
+  C.ejectResultTimer = setTimeout(() => {
+    overlay.classList.add('result');
+    $('ejectCaption').classList.add('show');
     if (meeting.ejectedRole === 'impostor') {
       sub.textContent = 'ERA O IMPOSTOR!';
       sub.classList.add('crew');
+      sfx.ejectResult(true);
     } else if (meeting.ejectedRole === 'crew') {
-      sub.textContent = 'Não era o impostor.';
+      const restam = C.state?.impostorsAlive;
+      sub.textContent = typeof restam === 'number'
+        ? `Não era o impostor. Restam ${restam} impostor${restam === 1 ? '' : 'es'}.`
+        : 'Não era o impostor.';
+      sfx.ejectResult(false);
     } else {
       sub.textContent = 'Papel desconhecido.';
+      sfx.ejectResult(false);
     }
-  }
+  }, 2100);
+
+  // clique/seta/ESC pula a cena
+  const pular = () => {
+    clearTimeout(C.ejectResultTimer);
+    clearTimeout(C.ejectTimer);
+    overlay.hidden = true;
+    overlay.classList.remove('fade', 'result');
+    $('ejectCaption').classList.remove('show');
+    document.removeEventListener('keydown', onKey);
+    overlay.removeEventListener('click', pular);
+  };
+  const onKey = (e) => { if (['Escape', 'Space', 'Enter'].includes(e.code)) pular(); };
+  overlay.addEventListener('click', pular);
+  document.addEventListener('keydown', onKey);
+
+  setTimeout(() => overlay.classList.add('fade'), 2700);
   clearTimeout(C.ejectTimer);
-  C.ejectTimer = setTimeout(() => { overlay.hidden = true; }, 3600);
+  C.ejectTimer = setTimeout(() => {
+    overlay.hidden = true;
+    overlay.classList.remove('fade', 'result');
+    $('ejectCaption').classList.remove('show');
+    document.removeEventListener('keydown', onKey);
+    overlay.removeEventListener('click', pular);
+  }, 3600);
 }
 
 /* ================================================================

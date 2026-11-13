@@ -50,14 +50,14 @@ A partida é autoritativa no servidor, então todos veem a mesma coisa.
 | **Portas** | O impostor fecha as portas de uma sala por 10 s, com cooldown de 30 s por sala e fechamento animado. |
 | **Corpos** | Quem encontra reporta; a reunião mostra onde o corpo estava. |
 | **Reunião** | Mesa com todos sentados ao redor (como no jogo), discussão + votação, chat, votos anônimos, empate e "pular voto". |
-| **Ejeção** | Cinemática no espaço com o tripulante girando e o texto "ERA O IMPOSTOR" / "Não era o impostor". |
+| **Ejeção** | Cinemática no espaço: escotilha abrindo, tripulante girando com rastro, estrelas passando, ~2 s de silêncio e então o veredito ("ERA O IMPOSTOR" / "Não era o impostor — restam N"), clique/ESC pula. Empate ou voto pulado não abrem a cena, como no jogo. |
 | **Fantasmas** | Mortos atravessam paredes, continuam completando as tarefas (contam na barra) e assistem à votação. |
 | **Bots** | Fazem tarefas, matam, reportam, consertam sabotagem, votam em duas ondas e continuam tarefas como fantasmas. |
 | **Mapa (Tab)** | Mapa do navio com salas nomeadas, sua posição, suas tarefas, sabotagem piscando e (para impostor) os demais jogadores. |
 | **Admin** | Na Administração: mesa com quantos jogadores vivos há em cada sala, em tempo real. |
 | **Vitais** | Na Enfermaria: batimento de cada jogador (vivo/morto) com a cor dele. |
 | **Câmeras** | Na Segurança: quatro telas ao vivo (Cafeteria, Armas, Navegação, Armazém) com jogadores, corpos e ruído de vídeo; a luz vermelha pisca. |
-| **Som** | Efeitos sintetizados em WebAudio: passos, kill, report, sirene de reunião, voto, ejeção, duto, porta, tarefa e alarme do reator. Botão de mudo. |
+| **Som** | 33 efeitos sintetizados em WebAudio (sem arquivos): passos, kill (volume cai com a distância), report, sirene de reunião, contagem regressiva dos últimos 5 s, voto, ejeção (ar comprimido) e veredito, duto, porta, sabotagem/conserto, alarme de reator/O₂, vitória/derrota, tarefa e conclusão das tarefas, chat, emergência, morte/fantasma, habilidade de cada papel, aviso de kill/habilidade prontos, escudo e transformação de outros jogadores, além do zumbido ambiente do casco com fade. Botão de mudo persistido. |
 | **Animação** | Caminhada com pernas alternadas, mochila, viseira com reflexo, tremor de câmera no abate, respingos, duto abrindo, portas deslizando, visão em círculo. |
 | **Geometria** | 14 salas com planta própria (octógono na Cafeteria, canto cortado em Armas, bico na Navegação, Armazém em L) e 21 corredores ligados de acordo com o mapa clássico, colisão por polígono. |
 | **Tarefas visuais** | Scan na Enfermaria, tiros de asteroide em Armas e anéis em Escudos aparecem para todos, como no jogo. |
@@ -87,6 +87,7 @@ node tests/crewwin.test.mjs      # vitória dos tripulantes
 node tests/taskwin.test.mjs      # vitória por tarefas (com fantasma terminando as dele)
 node tests/fidelity.test.mjs     # abate, tarefa de fantasma, portas, O₂, ejeção
 node tests/roles.test.mjs        # papéis, tempos ajustáveis, cópia do metamorfo, cosméticos e bots com habilidades
+node tests/audio.test.mjs        # cobertura de som: 33 efeitos, gatilhos por evento e cena de ejeção
 node tests/fullgame2.test.mjs    # partida completa só com bots
 node tests/online.test.mjs       # criar/entrar/lista pública/reconexão/kick (servidor rodando)
 ```
@@ -179,6 +180,9 @@ Comparado ao cliente oficial, ainda não estão aqui:
   do catálogo usa desenho procedural determinístico (mesma silhueta/paleta por id), porque os
   textures/sprites originais não estão nos dados textuais do repositório.
 - **Cosméticos** (chapéus, pets, skins) e progressão.
+- **Música e voz**: os efeitos são sintetizados e não há trilha/música de menu nem chat de voz
+  (o áudio do jogo original vem de assets de áudio que não estão no repositório). Não há áudio
+  posicional (panning estéreo) — o kill só abaixa o volume com a distância.
 - **Matchmaking público com contas/regiões** — hoje as salas são por código e por lista.
 - **Geometria exata do mesh original** do Unity: as plantas foram reconstruídas a partir do
   mapa e das coordenadas oficiais, não extraídas do asset 3D (não há mesh em texto no repo).

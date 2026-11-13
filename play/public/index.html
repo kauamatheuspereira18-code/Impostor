@@ -332,6 +332,8 @@
     <div id="ejectOverlay" class="eject-overlay" hidden>
       <div class="eject-stars"></div>
       <div class="eject-stage">
+        <div class="eject-airlock"></div>
+        <div class="eject-trail"></div>
         <svg id="ejectCrew" class="eject-crew" viewBox="0 0 80 100" aria-hidden="true">
           <rect x="16" y="6" width="48" height="74" rx="22" fill="currentColor" />
           <rect x="10" y="28" width="10" height="34" rx="5" fill="rgba(0,0,0,0.3)" />
@@ -340,7 +342,7 @@
           <ellipse cx="52" cy="84" rx="10" ry="7" fill="currentColor" />
         </svg>
       </div>
-      <div class="eject-caption">
+      <div id="ejectCaption" class="eject-caption">
         <div id="ejectText" class="eject-text"></div>
         <div id="ejectSub" class="eject-sub"></div>
       </div>
@@ -380,6 +382,34 @@
         <p><b>Comunicação:</b> desativa as tarefas — conserte na Comunicação.</p>
         <h4>Reuniões</h4>
         <p>Reporte corpos ou use o botão da Cafeteria. Discuta no chat e vote; o mais votado é ejetado.</p>
+        <h4>Sons</h4>
+        <p>Toque para ouvir cada efeito do jogo (servem para testar o áudio do navegador).</p>
+        <div id="soundBoard" class="sound-board">
+          <button class="sound-btn" data-sound="click">Clique</button>
+          <button class="sound-btn" data-sound="footstep">Passo</button>
+          <button class="sound-btn" data-sound="taskDone">Tarefa</button>
+          <button class="sound-btn" data-sound="vent">Duto</button>
+          <button class="sound-btn" data-sound="kill">Abate</button>
+          <button class="sound-btn" data-sound="report">Report</button>
+          <button class="sound-btn" data-sound="meeting">Reunião</button>
+          <button class="sound-btn" data-sound="vote">Voto</button>
+          <button class="sound-btn" data-sound="tick">Contagem</button>
+          <button class="sound-btn" data-sound="eject">Ejeção</button>
+          <button class="sound-btn" data-sound="ejectResult">Veredito</button>
+          <button class="sound-btn" data-sound="denied">Empate</button>
+          <button class="sound-btn" data-sound="sabotage">Sabotagem</button>
+          <button class="sound-btn" data-sound="fixed">Conserto</button>
+          <button class="sound-btn" data-sound="emergency">Emergência</button>
+          <button class="sound-btn" data-sound="shift">Metamorfo</button>
+          <button class="sound-btn" data-sound="phantom">Fantasma</button>
+          <button class="sound-btn" data-sound="shield">Escudo</button>
+          <button class="sound-btn" data-sound="track">Rastreio</button>
+          <button class="sound-btn" data-sound="ghost">Morte</button>
+          <button class="sound-btn" data-sound="allTasks">Todas as tarefas</button>
+          <button class="sound-btn" data-sound="chat">Chat</button>
+          <button class="sound-btn" data-sound="win">Vitória</button>
+          <button class="sound-btn" data-sound="lose">Derrota</button>
+        </div>
       </div>
     </div>
   </div>

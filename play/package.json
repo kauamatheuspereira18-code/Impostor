@@ -10,7 +10,8 @@
     "test": "node tests/smoke.test.mjs",
     "test:edge": "node tests/edge.test.mjs",
     "test:full": "node tests/fullgame.test.mjs",
-    "test:roles": "node tests/roles.test.mjs"
+    "test:roles": "node tests/roles.test.mjs",
+    "test:audio": "node tests/audio.test.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",

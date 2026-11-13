@@ -21,7 +21,7 @@ class Sfx {
     if (!AC) return;
     this.ctx = new AC();
     this.master = this.ctx.createGain();
-    this.master.gain.value = 0.55;
+    this.master.gain.value = 0.70;
     this.master.connect(this.ctx.destination);
   }
 
@@ -31,7 +31,7 @@ class Sfx {
 
   setMuted(v) {
     this.muted = !!v;
-    if (this.master) this.master.gain.value = v ? 0 : 0.55;
+    if (this.master) this.master.gain.value = v ? 0 : 0.70;
     if (v) this.stopAlarm();
   }
 
@@ -78,11 +78,11 @@ class Sfx {
 
   /* ---------- interface ---------- */
   click() {
-    this.tone({ freq: 620, to: 480, type: 'triangle', dur: 0.06, gain: 0.10 });
+    this.tone({ freq: 620, to: 480, type: 'triangle', dur: 0.06, gain: 0.12 });
   }
 
   hover() {
-    this.tone({ freq: 900, type: 'sine', dur: 0.03, gain: 0.03 });
+    this.tone({ freq: 900, type: 'sine', dur: 0.045, gain: 0.05 });
   }
 
   taskStep() {
@@ -96,7 +96,7 @@ class Sfx {
 
   /* ---------- jogo ---------- */
   footstep() {
-    this.noise({ dur: 0.07, gain: 0.05, filter: 320, type: 'lowpass' });
+    this.noise({ dur: 0.09, gain: 0.11, filter: 520, type: 'lowpass' });
   }
 
   vent() {
@@ -104,10 +104,12 @@ class Sfx {
     this.tone({ freq: 200, to: 90, type: 'sawtooth', dur: 0.3, gain: 0.08 });
   }
 
-  kill() {
-    this.noise({ dur: 0.45, gain: 0.32, filter: 1600, sweepTo: 180 });
-    this.tone({ freq: 180, to: 55, type: 'sawtooth', dur: 0.5, gain: 0.22 });
-    this.tone({ freq: 90, to: 40, type: 'sine', dur: 0.7, gain: 0.2, delay: 0.03 });
+  kill(volume = 1) {
+    // volume cai com a distância (quem está longe ouve o grito abafado)
+    const v = Math.max(0.12, Math.min(1, volume));
+    this.noise({ dur: 0.45, gain: 0.32 * v, filter: 1600, sweepTo: 180 });
+    this.tone({ freq: 180, to: 55, type: 'sawtooth', dur: 0.5, gain: 0.22 * v });
+    this.tone({ freq: 90, to: 40, type: 'sine', dur: 0.7, gain: 0.2 * v, delay: 0.03 });
   }
 
   report() {
@@ -125,8 +127,27 @@ class Sfx {
   }
 
   eject() {
-    this.noise({ dur: 1.4, gain: 0.20, filter: 200, type: 'lowpass', sweepTo: 2400 });
-    this.tone({ freq: 120, to: 60, type: 'sine', dur: 1.2, gain: 0.14 });
+    // ar comprimido da escotilha + casco tremendo
+    this.noise({ dur: 1.6, gain: 0.22, filter: 240, type: 'bandpass', sweepTo: 3200 });
+    this.noise({ dur: 0.22, gain: 0.12, filter: 1800, type: 'highpass', delay: 0.9 });
+    this.tone({ freq: 96, to: 42, type: 'sine', dur: 1.1, gain: 0.16 });
+  }
+
+  /** Resultado da votação: acertou o impostor (ok) ou não. */
+  ejectResult(ok) {
+    if (ok) {
+      this.tone({ freq: 523, type: 'triangle', dur: 0.16, gain: 0.13, delay: 0 });
+      this.tone({ freq: 659, type: 'triangle', dur: 0.16, gain: 0.13, delay: 0.14 });
+      this.tone({ freq: 880, type: 'triangle', dur: 0.30, gain: 0.13, delay: 0.28 });
+    } else {
+      this.tone({ freq: 330, to: 240, type: 'sine', dur: 0.34, gain: 0.12 });
+      this.tone({ freq: 196, to: 150, type: 'sine', dur: 0.40, gain: 0.12, delay: 0.20 });
+    }
+  }
+
+  denied() {
+    this.tone({ freq: 226, type: 'square', dur: 0.11, gain: 0.09 });
+    this.tone({ freq: 170, type: 'square', dur: 0.16, gain: 0.09, delay: 0.10 });
   }
 
   door() {
@@ -152,6 +173,63 @@ class Sfx {
   lose() {
     [392, 330, 262, 196].forEach((f, i) =>
       this.tone({ freq: f, type: 'sawtooth', dur: 0.35, gain: 0.13, delay: i * 0.16 }));
+  }
+
+  /* ---------- habilidades ---------- */
+  shift() {
+    // shimmer metálico da transformação
+    this.tone({ freq: 320, to: 880, type: 'triangle', dur: 0.4, gain: 0.10 });
+    this.tone({ freq: 640, to: 1320, type: 'sine', dur: 0.35, gain: 0.07, delay: 0.05 });
+    this.noise({ dur: 0.3, gain: 0.05, filter: 2200, sweepTo: 900 });
+  }
+
+  phantom() {
+    // quem some: grave subindo + sopro
+    this.tone({ freq: 180, to: 60, type: 'sine', dur: 0.6, gain: 0.12 });
+    this.noise({ dur: 0.5, gain: 0.07, filter: 500, sweepTo: 1800 });
+  }
+
+  shield() {
+    // bolha do anjo da guarda
+    this.tone({ freq: 520, to: 760, type: 'sine', dur: 0.35, gain: 0.09 });
+    this.tone({ freq: 780, to: 1040, type: 'sine', dur: 0.4, gain: 0.06, delay: 0.06 });
+  }
+
+  track() {
+    this.tone({ freq: 980, to: 1320, type: 'square', dur: 0.08, gain: 0.085 });
+    this.tone({ freq: 1320, type: 'square', dur: 0.06, gain: 0.06, delay: 0.09 });
+  }
+
+  abilityReady() {
+    this.tone({ freq: 660, to: 990, type: 'sine', dur: 0.12, gain: 0.08 });
+  }
+
+  killReady() {
+    [440, 660].forEach((f, i) => this.tone({ freq: f, type: 'sine', dur: 0.1, gain: 0.085, delay: i * 0.1 }));
+  }
+
+  /* ---------- interface do jogo ---------- */
+  chat() {
+    this.tone({ freq: 880, type: 'sine', dur: 0.06, gain: 0.075 });
+  }
+
+  tick() {
+    this.tone({ freq: 1200, type: 'square', dur: 0.045, gain: 0.07 });
+  }
+
+  emergency() {
+    this.tone({ freq: 300, to: 180, type: 'square', dur: 0.25, gain: 0.13 });
+    this.noise({ dur: 0.25, gain: 0.10, filter: 900, sweepTo: 300 });
+  }
+
+  ghost() {
+    this.tone({ freq: 220, to: 90, type: 'sine', dur: 0.9, gain: 0.10 });
+    this.noise({ dur: 0.8, gain: 0.06, filter: 420, sweepTo: 1200 });
+  }
+
+  allTasks() {
+    [523, 659, 784, 1046, 1318].forEach((f, i) =>
+      this.tone({ freq: f, type: 'triangle', dur: 0.22, gain: 0.12, delay: i * 0.1 }));
   }
 
   /* ---------- alarme de sabotagem crítica ---------- */
@@ -187,22 +265,29 @@ class Sfx {
     osc2.frequency.value = 82.5;
     f.type = 'lowpass';
     f.frequency.value = 260;
-    g.gain.value = 0.045;
+    const t = c.currentTime;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.030, t + 0.8);
     osc.connect(f);
     osc2.connect(f);
     f.connect(g).connect(this.master);
-    osc.start();
-    osc2.start();
+    osc.start(t);
+    osc2.start(t);
     this.ambient = { osc, osc2, g };
   }
 
   stopAmbient() {
     if (!this.ambient) return;
-    try {
-      this.ambient.osc.stop();
-      this.ambient.osc2.stop();
-    } catch { /* já parado */ }
+    const { osc, osc2, g } = this.ambient;
     this.ambient = null;
+    const t = this.ctx.currentTime;
+    try {
+      g.gain.cancelScheduledValues(t);
+      g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+      osc.stop(t + 0.4);
+      osc2.stop(t + 0.4);
+    } catch { /* já parado */ }
   }
 }
 
