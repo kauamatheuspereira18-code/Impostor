@@ -124,6 +124,7 @@
           <span class="role-name" id="roleName">TRIPULANTE</span>
           <span class="role-desc" id="roleDesc">Complete suas tarefas</span>
         </div>
+        <div id="roleState" class="role-state" hidden></div>
         <div id="taskBarWrap" class="taskbar" hidden>
           <div class="taskbar-label">Tarefas</div>
           <div class="taskbar-track"><div id="taskBarFill" class="taskbar-fill"></div></div>
@@ -174,6 +175,11 @@
         </div>
 
         <div class="hud-right-controls">
+          <button id="btnAbility" class="action-btn action-ability" hidden>
+            <span class="action-ico">✦</span>
+            <span class="action-label">Habilidade</span>
+            <span class="action-cd" id="abilityCd"></span>
+          </button>
           <button id="btnReport" class="action-btn action-report" hidden>
             <span class="action-ico">!</span>
             <span class="action-label">Reportar</span>
@@ -250,6 +256,18 @@
       </div>
     </div>
 
+    <!-- escolha de alvo de habilidade -->
+    <div id="abilityModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-head">
+          <h3 id="abilityTitle">Escolha o alvo</h3>
+          <button id="abilityClose" class="icon-btn">✕</button>
+        </div>
+        <p id="abilityHint" class="ability-hint"></p>
+        <div id="abilityGrid" class="ability-grid"></div>
+      </div>
+    </div>
+
     <!-- reunião -->
     <div id="meeting" class="meeting" hidden>
       <div class="meeting-card">
@@ -281,6 +299,19 @@
     </div>
 
     <!-- cinemática de ejeção -->
+    <!-- revelação de papel no começo da partida -->
+    <div id="roleReveal" class="role-reveal" hidden>
+      <div class="rr-rays"></div>
+      <div class="rr-card">
+        <div id="rrTeam" class="rr-team">TRIPULANTE</div>
+        <h1 id="rrName" class="rr-name">Tripulante</h1>
+        <p id="rrDesc" class="rr-desc"></p>
+        <p id="rrHint" class="rr-hint"></p>
+        <div id="rrMates" class="rr-mates"></div>
+        <button id="rrOk" class="btn btn-primary">Entendi</button>
+      </div>
+    </div>
+
     <div id="ejectOverlay" class="eject-overlay" hidden>
       <div class="eject-stars"></div>
       <div class="eject-stage">

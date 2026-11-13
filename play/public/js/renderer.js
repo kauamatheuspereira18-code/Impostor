@@ -120,22 +120,34 @@ export class Renderer {
     drawSpace(ctx, this.w, this.h, this.time, this.camera.x, this.camera.y, this.zoom);
 
     this.drawShip(state, opts);
-    for (const body of state.bodies || []) this.drawBody(body, state);
+    this.bodyBirth = this.bodyBirth || new Map();
+    for (const body of state.bodies || []) {
+      if (!this.bodyBirth.has(body.id)) this.bodyBirth.set(body.id, performance.now());
+      this.drawBody(body, state);
+    }
     this.drawVisualTasks();
     this.drawKills(state);
 
+    for (const a of state.noiseAlarms || []) this.drawNoiseAlarm(a);
+
+    const tracked = new Set((state.you?.tracked || []).map((t) => t.id));
     const players = state.players || [];
     for (const p of players) {
       if (!p.alive) continue;
+      if (tracked.has(p.id)) this.drawTracked(p);
       if (p.inVent && p.id !== me?.id) continue;
+      if (p.hidden && p.id !== me?.id) continue;
       this.drawPlayer(p, p.id === me?.id, state);
+      if (p.shielded) this.drawShield(p);
+      if (p.poisoned && p.id !== me?.id) this.drawPoison(p);
     }
     for (const p of players) {
       if (p.alive) continue;
       this.drawGhost(p, state);
     }
 
-    if (me?.role === 'impostor' && state.ship?.vents?.length) this.drawVents(state.ship.vents, me);
+    const canVent = me?.role === 'impostor' || me?.roleType === 'Engineer';
+    if (canVent && state.ship?.vents?.length) this.drawVents(state.ship.vents, me);
     this.drawDoors(state);
     this.drawTaskArrow(state, me);
 
@@ -538,9 +550,48 @@ export class Renderer {
       walk: sm.walk,
       phase: this.time * 3,
       ghost,
-      alpha: ghost ? 0.55 : 1,
+      alpha: ghost ? 0.55 : (p.hidden ? 0.42 : 1),
       highlight: false,
     });
+
+    // brilho de metamorfose (quem está transformado)
+    if (p.shifted) this.drawShiftShimmer(s.x, s.y, h);
+    // contorno fantasma quando invisível (só eu me vejo assim)
+    if (p.hidden) {
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.strokeStyle = 'rgba(170, 210, 255, 0.8)';
+      ctx.lineWidth = Math.max(1, this.zoom * 0.03);
+      ctx.setLineDash([this.zoom * 0.08, this.zoom * 0.07]);
+      ctx.lineDashOffset = -this.time * this.zoom * 0.35;
+      ctx.beginPath();
+      ctx.ellipse(s.x, s.y + h * 0.12, h * 0.42, h * 0.55, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  /** Faíscas de metamorfose ao redor do impostor transformado. */
+  drawShiftShimmer(x, y, h) {
+    const { ctx } = this;
+    ctx.save();
+    for (let i = 0; i < 7; i++) {
+      const a = this.time * 1.9 + (i / 7) * Math.PI * 2;
+      const rr = h * (0.46 + 0.08 * Math.sin(this.time * 3 + i));
+      const px = x + Math.cos(a) * rr;
+      const py = y + Math.sin(a) * rr * 0.72;
+      const sz = h * 0.05 * (0.7 + 0.5 * Math.sin(this.time * 5 + i * 1.7));
+      ctx.globalAlpha = 0.35 + 0.35 * Math.sin(this.time * 4 + i);
+      ctx.fillStyle = i % 2 ? '#d6b3ff' : '#8fd9ff';
+      ctx.beginPath();
+      ctx.moveTo(px, py - sz);
+      ctx.lineTo(px + sz, py);
+      ctx.lineTo(px, py + sz);
+      ctx.lineTo(px - sz, py);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   drawGhost(p, state) {
@@ -580,6 +631,124 @@ export class Renderer {
     void state;
   }
 
+  /** Alvo marcado pelo Rastreador: mira girando. */
+  drawTracked(p) {
+    const { ctx } = this;
+    const sm = this.smoothFor(p);
+    const s = this.worldToScreen(sm.x, sm.y);
+    const r = this.zoom * 0.5;
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.rotate(this.time * 1.4);
+    ctx.strokeStyle = 'rgba(255, 214, 106, 0.9)';
+    ctx.lineWidth = Math.max(1.2, this.zoom * 0.035);
+    for (let i = 0; i < 4; i++) {
+      ctx.beginPath();
+      ctx.arc(0, 0, r, i * (Math.PI / 2) + 0.2, i * (Math.PI / 2) + 0.9);
+      ctx.stroke();
+    }
+    ctx.restore();
+    ctx.save();
+    ctx.fillStyle = 'rgba(255, 214, 106, 0.95)';
+    ctx.font = `700 ${Math.max(8, this.zoom * 0.22)}px "Baloo 2", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('◎', s.x, s.y - r - this.zoom * 0.1);
+    ctx.restore();
+  }
+
+  /** Bolha do Anjo da Guarda. */
+  drawShield(p) {
+    const { ctx } = this;
+    const sm = this.smoothFor(p);
+    const s = this.worldToScreen(sm.x, sm.y);
+    const r = this.zoom * 0.72;
+    const pulse = 0.6 + 0.4 * Math.sin(this.time * 3.2);
+    ctx.save();
+    const grad = ctx.createRadialGradient(s.x, s.y, r * 0.2, s.x, s.y, r * 1.25);
+    grad.addColorStop(0, 'rgba(120, 220, 255, 0.05)');
+    grad.addColorStop(0.7, `rgba(120, 220, 255, ${0.13 * pulse})`);
+    grad.addColorStop(1, 'rgba(120, 220, 255, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, r * 1.25, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = `rgba(150, 235, 255, ${0.55 + 0.25 * pulse})`;
+    ctx.lineWidth = Math.max(1, this.zoom * 0.04);
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    // hexágonos orbitando
+    for (let i = 0; i < 6; i++) {
+      const a = this.time * 1.6 + (i / 6) * Math.PI * 2;
+      const hx = s.x + Math.cos(a) * r;
+      const hy = s.y + Math.sin(a) * r * 0.55;
+      ctx.globalAlpha = 0.5 + 0.4 * pulse;
+      ctx.fillStyle = '#bff2ff';
+      ctx.beginPath();
+      for (let k = 0; k < 6; k++) {
+        const ang = (k / 6) * Math.PI * 2 + this.time;
+        const rr = this.zoom * 0.055;
+        const x = hx + Math.cos(ang) * rr;
+        const y = hy + Math.sin(ang) * rr;
+        k ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  /** Veneno da Víbora: fumaça verde subindo do alvo. */
+  drawPoison(p) {
+    const { ctx } = this;
+    const sm = this.smoothFor(p);
+    const s = this.worldToScreen(sm.x, sm.y);
+    const h = this.zoom * 0.9;
+    ctx.save();
+    for (let i = 0; i < 5; i++) {
+      const t = (this.time * 0.7 + i / 5) % 1;
+      const a = 0.22 * (1 - t);
+      ctx.globalAlpha = a;
+      ctx.fillStyle = '#6ef07a';
+      ctx.beginPath();
+      ctx.arc(s.x + Math.sin((t + i) * 7) * h * 0.22, s.y - t * h * 0.85, h * 0.07 * (1 - t * 0.5), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 0.5 + 0.2 * Math.sin(this.time * 5);
+    ctx.strokeStyle = '#8dff7a';
+    ctx.lineWidth = Math.max(1, this.zoom * 0.03);
+    ctx.beginPath();
+    ctx.arc(s.x, s.y + h * 0.1, h * 0.42, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /** Alarme do Barulhento: ondas sonoras no local da morte. */
+  drawNoiseAlarm(a) {
+    const { ctx } = this;
+    const s = this.worldToScreen(a.x, a.y);
+    const left = Math.max(0, (a.until - Date.now()) / 1000);
+    const k = 1 - Math.min(1, left / 5);
+    ctx.save();
+    for (let i = 0; i < 3; i++) {
+      const t = (this.time * 1.2 + i / 3) % 1;
+      const r = this.zoom * (0.2 + t * 0.9);
+      ctx.globalAlpha = (1 - t) * 0.5 * (1 - k * 0.4);
+      ctx.strokeStyle = '#ffd76a';
+      ctx.lineWidth = Math.max(1.2, this.zoom * 0.05);
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = '#ffe08a';
+    ctx.font = `700 ${Math.max(10, this.zoom * 0.3)}px "Baloo 2", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('!', s.x, s.y - this.zoom * 0.2);
+    ctx.restore();
+    void a;
+  }
+
   drawBody(body, state) {
     const { ctx } = this;
     const col = COLORS[body.color] || COLORS[0];
@@ -594,7 +763,16 @@ export class Renderer {
     ctx.arc(s.x, s.y, h * 0.62, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
+    // "pop" de surgimento do corpo
+    const born = this.bodyBirth?.get(body.id) || 0;
+    const age = born ? Math.min(1, (performance.now() - born) / 320) : 1;
+    const pop = 0.6 + 0.4 * age + 0.12 * Math.sin(age * Math.PI);
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.scale(pop, pop);
+    ctx.translate(-s.x, -s.y);
     drawCorpse(ctx, { x: s.x, y: s.y, h, color: col.hex, rotation: (body.x * 13) % 1 + 0.2, t: this.time });
+    ctx.restore();
     void state;
   }
 
@@ -1035,6 +1213,22 @@ export class Renderer {
         }
       }
     }
+    // alvos marcados pelo rastreador
+    for (const t of state.you?.tracked || []) {
+      const p = state.players.find((q) => q.id === t.id);
+      if (!p || !p.alive) continue;
+      const [sx, sy] = toS(p.x, p.y);
+      ctx.strokeStyle = 'rgba(255, 214, 106, 0.95)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = colorOf(p.color);
+      ctx.beginPath();
+      ctx.arc(sx, sy, 2.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     // sabotagem
     if (state.sabotage) {
       const room = spaces.find((s) => s.id === state.sabotage.roomId);

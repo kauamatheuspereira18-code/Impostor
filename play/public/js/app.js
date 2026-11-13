@@ -1,9 +1,19 @@
-import { GAME_CONSTANTS, RULE_PRESETS, SABOTAGE_INFO, MAP_SABOTAGES } from '/shared/rules.js';
+import { GAME_CONSTANTS, RULE_PRESETS, SABOTAGE_INFO, MAP_SABOTAGES, ROLE_INFO } from '/shared/rules.js';
 import { Renderer } from './renderer.js';
 import { TASK_GAMES } from './tasks.js';
 import { sfx } from './sfx.js';
 
 const $ = (id) => document.getElementById(id);
+
+/** Botões de habilidade por papel (mesmos nomes do jogo). */
+const ABILITY_UI = {
+  Shapeshifter: { label: 'Transformar', ico: '◐', target: true, hint: 'Escolha quem você vai imitar por 10s.' },
+  Phantom: { label: 'Invisível', ico: '◌', target: false, hint: 'Fique invisível por 5s.' },
+  Viper: { label: 'Veneno', ico: '☣', target: true, hint: 'Escolha quem vai morrer envenenado.' },
+  Tracker: { label: 'Rastrear', ico: '◎', target: true, hint: 'Marque um jogador e veja a posição dele.' },
+  'Guardian Angel': { label: 'Proteger', ico: '✚', target: true, hint: 'Dê um escudo a um jogador vivo.' },
+  Scientist: { label: 'Vitais', ico: '♥', target: false, hint: 'Abra os vitais gastando bateria.' },
+};
 const socket = io({ transports: ['websocket', 'polling'] });
 
 /** estado global do cliente */
@@ -26,6 +36,9 @@ const C = {
   session: null,
   lastKillAt: 0,
   lastEjectAt: 0,
+  revealKey: 0,
+  lastAlarmAt: 0,
+  revealTimer: null,
   mapOpen: false,
   muted: false,
   prevPhase: null,
@@ -301,6 +314,10 @@ socket.on('state', (state) => {
   } else {
     sfx.stopAlarm();
   }
+  document.body.classList.toggle(
+    'sab-critical',
+    !!state.sabotage && ['reactor', 'o2'].includes(state.sabotage.type) && state.state === 'tasks',
+  );
 
   if (state.state === 'lobby' || state.state === 'ended') {
     if (C.special) closeSpecial();
@@ -428,6 +445,16 @@ const SETTINGS_DEFS = [
   { key: 'emergencyMeetings', label: 'Reuniões de emergência', min: 0, max: 9, step: 1, fmt: (v) => (v === 0 ? 'Nenhuma' : v) },
   { key: 'emergencyCooldown', label: 'Cooldown da emergência', min: 0, max: 60, step: 5, fmt: (v) => `${v}s` },
 ];
+const ROLE_DEFS = [
+  { key: 'shapeshifter', role: 'Shapeshifter' },
+  { key: 'phantom', role: 'Phantom' },
+  { key: 'viper', role: 'Viper' },
+  { key: 'engineer', role: 'Engineer' },
+  { key: 'scientist', role: 'Scientist' },
+  { key: 'noisemaker', role: 'Noisemaker' },
+  { key: 'tracker', role: 'Tracker' },
+  { key: 'guardianAngel', role: 'Guardian Angel' },
+];
 const TOGGLES = [
   { key: 'confirmImpostor', label: 'Confirmar impostor na ejeção' },
   { key: 'anonymousVotes', label: 'Votos anônimos' },
@@ -464,6 +491,34 @@ function buildSettings(state, isHost) {
     const input = row.querySelector('input');
     input.addEventListener('input', () => { row.querySelector('b').textContent = def.fmt(+input.value); });
     input.addEventListener('change', () => emit('setSettings', { patch: { [def.key]: +input.value } }));
+    list.append(row);
+  }
+
+  // ---------------- papéis ----------------
+  const roles = state.settings.roles || {};
+  const roleHead = el('div', 'setting-row role-head-row');
+  roleHead.innerHTML = '<div class="setting-head"><span>Papéis especiais</span><b>até 3 de cada</b></div>';
+  list.append(roleHead);
+
+  for (const def of ROLE_DEFS) {
+    const info = ROLE_INFO[def.role];
+    const value = roles[def.key] || 0;
+    const row = el('div', 'setting-row role-row');
+    row.dataset.team = info?.team || 'crew';
+    row.innerHTML = `
+      <div class="setting-head">
+        <span>${escapeHtml(info?.name || def.role)} <em class="role-team">${info?.team === 'impostor' ? 'impostor' : 'tripulante'}</em></span>
+        <b>${value === 0 ? 'desligado' : value}</b>
+      </div>
+      <input type="range" min="0" max="3" step="1" value="${value}" ${isHost ? '' : 'disabled'} />
+      <p class="role-note">${escapeHtml(info?.desc || '')}</p>`;
+    const input = row.querySelector('input');
+    input.addEventListener('input', () => {
+      row.querySelector('b').textContent = +input.value === 0 ? 'desligado' : input.value;
+    });
+    input.addEventListener('change', () => {
+      emit('setSettings', { patch: { roles: { ...(C.state?.settings?.roles || {}), [def.key]: +input.value } } });
+    });
     list.append(row);
   }
 
@@ -515,6 +570,7 @@ window.addEventListener('keydown', (e) => {
   C.keys.add(e.key.toLowerCase());
   if (e.key === 'e' || e.key === ' ') { e.preventDefault(); $('btnUse').click(); }
   if (e.key === 'q') $('btnKill').click();
+  if (e.key === 'f') $('btnAbility').click();
   if (e.key === 'r') $('btnReport').click();
   if (e.key === 'f') $('btnSabotage').click();
   if (e.key === 'm') $('btnMute').click();
@@ -666,25 +722,39 @@ function renderHud(st) {
   // fantasma
   $('ghostBanner').hidden = !(st.state === 'tasks' && !st.you.alive);
 
+  // revelação de papel (uma vez por partida)
+  maybeRoleReveal(st);
+
+  // alarme do barulhento (som + aviso)
+  const alarms = st.noiseAlarms || [];
+  const lastAlarm = alarms[alarms.length - 1];
+  if (lastAlarm && C.lastAlarmAt !== lastAlarm.at) {
+    C.lastAlarmAt = lastAlarm.at;
+    sfx.startAlarm?.();
+    setTimeout(() => sfx.stopAlarm?.(), 1400);
+    toast(`Alarme do Barulhento: ${lastAlarm.name}`);
+  }
+
   // papel
   const roleCard = $('roleCard');
   const roleName = $('roleName');
   const roleDesc = $('roleDesc');
   if (st.state === 'tasks') {
     roleCard.hidden = false;
+    const info = ROLE_INFO[st.you.roleType];
+    const imp = st.you.role === 'impostor';
+    roleName.classList.toggle('impostor', imp && st.you.alive);
     if (!st.you.alive) {
-      roleName.textContent = 'FANTASMA';
+      roleName.textContent = imp ? 'IMPOSTOR MORTO' : 'TRIPULANTE MORTO';
       roleName.classList.remove('impostor');
-      roleDesc.textContent = 'Continue as tarefas e observe';
-    } else if (st.you.role === 'impostor') {
-      roleName.textContent = 'IMPOSTOR';
-      roleName.classList.add('impostor');
-      roleDesc.textContent = 'Mate a tripulação e sabote';
+      roleDesc.textContent = 'Fantasma: termine suas tarefas e observe';
     } else {
-      roleName.textContent = 'TRIPULANTE';
-      roleName.classList.remove('impostor');
-      roleDesc.textContent = 'Complete suas tarefas';
+      roleName.textContent = (info?.name || (imp ? 'Impostor' : 'Tripulante')).toUpperCase();
+      const hint = info?.hint ? ` · ${info.hint}` : '';
+      roleDesc.textContent = (info?.desc || (imp ? 'Mate a tripulação e sabote.' : 'Complete suas tarefas.')) + hint;
     }
+    roleCard.dataset.team = st.you.role;
+    roleCard.dataset.role = st.you.roleType || '';
   } else {
     roleCard.hidden = true;
   }
@@ -941,9 +1011,22 @@ function updateActionAvailability() {
   const alive = me.alive;
   // DUTO: perto de um duto e impostor
   const nearVent = st.ship.vents.find((v) => Math.hypot(v.x - C.local.x, v.y - C.local.y) < 1.5);
-  const showVent = st.you.role === 'impostor' && alive;
+  const engineer = st.you.roleType === 'Engineer';
+  const showVent = (st.you.role === 'impostor' || engineer) && alive;
   ventBtn.hidden = !showVent;
-  if (showVent) ventBtn.disabled = !nearVent && !st.you.inVent;
+  if (showVent) ventBtn.disabled = (!nearVent && !st.you.inVent) || (engineer && Date.now() < (st.you.abilityReadyAt || 0));
+
+  // HABILIDADE DO PAPEL (metamorfo, fantasma, víbora, rastreador, anjo, cientista)
+  const abilityBtn = $('btnAbility');
+  const ability = ABILITY_UI[st.you.roleType];
+  const canAbility = !!ability && (alive || st.you.roleType === 'Guardian Angel');
+  abilityBtn.hidden = !canAbility || st.you.inVent;
+  if (canAbility) {
+    abilityBtn.querySelector('.action-label').textContent = ability.label;
+    abilityBtn.querySelector('.action-ico').textContent = ability.ico;
+    abilityBtn.disabled = Date.now() < (st.you.abilityReadyAt || 0);
+    abilityBtn.classList.toggle('pulse', !abilityBtn.disabled);
+  }
 
   // MATAR: alcance + cooldown
   let nearVictim = null;
@@ -1007,7 +1090,7 @@ function updateActionAvailability() {
     specialBtn.classList.add('pulse');
     specialBtn.dataset.kind = special;
     if (C.special && C.special !== special) closeSpecial();
-  } else if (C.special) {
+  } else if (C.special && !(C.special === 'MedBay' && st.you.roleType === 'Scientist')) {
     closeSpecial();
   }
 
@@ -1015,6 +1098,60 @@ function updateActionAvailability() {
   const ventUi = $('ventUi');
   ventUi.hidden = !st.you.inVent;
 }
+
+/* ---------------- revelação de papel ---------------- */
+function hideRoleReveal() {
+  clearTimeout(C.revealTimer);
+  const box = $('roleReveal');
+  if (box.hidden) return;
+  box.classList.remove('in');
+  setTimeout(() => { box.hidden = true; }, 260);
+}
+
+function maybeRoleReveal(st) {
+  if (st.state !== 'tasks' || !st.you) return;
+  const key = st.startedAt || 0;
+  if (!key || C.revealKey === key) return;
+  C.revealKey = key;
+
+  const info = ROLE_INFO[st.you.roleType] || {};
+  const imp = st.you.role === 'impostor';
+  const team = $('rrTeam');
+  team.textContent = st.you.alive ? (imp ? 'IMPOSTOR' : 'TRIPULANTE') : 'FANTASMA';
+  team.className = 'rr-team' + (imp ? ' imp' : ' crew');
+  $('rrName').textContent = info.name || (imp ? 'Impostor' : 'Tripulante');
+  $('rrName').className = 'rr-name' + (imp ? ' imp' : '');
+  $('rrDesc').textContent = info.desc || (imp ? 'Mate a tripulação e sabote a nave.' : 'Complete suas tarefas.');
+  $('rrHint').textContent = info.hint || '';
+  $('rrHint').hidden = !info.hint;
+
+  const mates = st.you.impostorTeammates || [];
+  const box = $('rrMates');
+  box.innerHTML = '';
+  if (imp && mates.length) {
+    box.hidden = false;
+    box.innerHTML = `<span class="rr-mates-label">Seus cúmplices</span>${mates
+      .map((m) => {
+        const hex = C.colors.find((c) => c.id === m.color)?.hex || '#ddd';
+        return `<span class="rr-mate"><i style="background:${hex}"></i>${escapeHtml(m.name)}</span>`;
+      })
+      .join('')}`;
+  } else {
+    box.hidden = true;
+  }
+
+  const overlay = $('roleReveal');
+  overlay.hidden = false;
+  requestAnimationFrame(() => overlay.classList.add('in'));
+  if (imp) sfx.kill?.(); else sfx.click?.();
+  clearTimeout(C.revealTimer);
+  C.revealTimer = setTimeout(hideRoleReveal, 7000);
+  void $('rrOk');
+}
+$('rrOk').addEventListener('click', hideRoleReveal);
+$('roleReveal').addEventListener('click', (e) => {
+  if (e.target === $('roleReveal')) hideRoleReveal();
+});
 
 function updateCooldowns() {
   const st = C.state;
@@ -1028,6 +1165,35 @@ function updateCooldowns() {
   const pct = Math.max(0, Math.min(100, (left / total) * 100));
   btn.style.setProperty('--cd', pct.toFixed(1));
   btn.style.setProperty('--cd-on', left > 0 ? '1' : '0');
+
+  // recarga da habilidade
+  const aBtn = $('btnAbility');
+  const abilityCd = $('abilityCd');
+  if (!aBtn.hidden) {
+    const totalA = (ABILITY_UI[st.you.roleType] && st.you.abilityCooldownMs) || 0;
+    const leftA = Math.max(0, (st.you.abilityReadyAt || 0) - Date.now());
+    abilityCd.hidden = leftA <= 0;
+    abilityCd.textContent = leftA > 0 ? Math.ceil(leftA / 1000) : '';
+    const pctA = totalA ? Math.max(0, Math.min(100, (leftA / totalA) * 100)) : 0;
+    aBtn.style.setProperty('--cd', pctA.toFixed(1));
+    aBtn.style.setProperty('--cd-on', leftA > 0 ? '1' : '0');
+  }
+
+  // estado de efeitos (invisível, transformado, escudo, bateria)
+  const rs = $('roleState');
+  const chips = [];
+  if (left <= 0 && st.you.role === 'impostor' && st.you.alive) chips.push('Matar pronto');
+  if ((st.you.phantomUntil || 0) > Date.now()) chips.push(`Invisível ${Math.ceil((st.you.phantomUntil - Date.now()) / 1000)}s`);
+  if ((st.you.shiftUntil || 0) > Date.now()) chips.push(`Transformado ${Math.ceil((st.you.shiftUntil - Date.now()) / 1000)}s`);
+  if ((st.you.shieldUntil || 0) > Date.now()) chips.push(`Escudo ${Math.ceil((st.you.shieldUntil - Date.now()) / 1000)}s`);
+  if (st.you.roleType === 'Scientist') chips.push(`Bateria ${st.you.battery ?? 100}%`);
+  if (st.you.roleType === 'Tracker' && st.you.alive) chips.push(`Marcações ${st.you.trackerUses ?? 0}`);
+  const ventLeft = st.you.inVent && st.you.roleType === 'Engineer'
+    ? Math.max(0, 5 - (Date.now() - (st.you.ventEnteredAt || Date.now())) / 1000)
+    : null;
+  if (ventLeft !== null) chips.push(`Duto ${ventLeft.toFixed(1)}s`);
+  rs.hidden = !chips.length;
+  rs.innerHTML = chips.map((c) => `<span class="rs-chip">${escapeHtml(c)}</span>`).join('');
 }
 
 /* ================================================================
@@ -1073,7 +1239,12 @@ $('btnReport').addEventListener('click', () => {
     if (d < bd) { bd = d; best = b; }
   }
   if (!best) return toast('Nenhum corpo por perto.');
-  socket.emit('report', { bodyId: best.id }, (res) => { if (res?.error) toast(res.error); });
+  socket.emit('report', { bodyId: best.id }, (res) => {
+    if (res?.error) return toast(res.error);
+    flashScreen('red', 260);
+    renderer.shake(14, 420);
+    sfx.report();
+  });
 });
 
 $('btnVent').addEventListener('click', () => {
@@ -1114,12 +1285,68 @@ $('btnSabotage').addEventListener('click', () => {
 $('sabClose').addEventListener('click', () => $('sabotageModal').setAttribute('hidden', ''));
 
 $('btnEmergency').addEventListener('click', () => {
-  socket.emit('emergency', (res) => { if (res?.error) toast(res.error); });
+  socket.emit('emergency', (res) => {
+    if (res?.error) return toast(res.error);
+    flashScreen('red', 320);
+    renderer.shake(10, 380);
+    sfx.meeting();
+  });
 });
 
 $('btnSpecial').addEventListener('click', () => {
   const kind = $('btnSpecial').dataset.kind;
   if (kind) openSpecial(kind);
+});
+
+/* ---------------- habilidades de papel ---------------- */
+function emitAbility(targetId) {
+  const you = C.state?.you;
+  if (!you) return;
+  socket.emit('ability', { type: you.roleType, targetId: targetId || null }, (res) => {
+    if (res?.error) return toast(res.error);
+    if (you.roleType === 'Scientist') openSpecial('MedBay');
+    else if (you.roleType === 'Viper') toast('Veneno aplicado — a vítima cai em instantes.');
+    else if (you.roleType === 'Phantom') toast('Você ficou invisível.');
+    else if (you.roleType === 'Shapeshifter') toast('Transformação ativa.');
+    sfx.click();
+  });
+}
+
+function openAbilityModal() {
+  const st = C.state;
+  if (!st?.you) return;
+  const ui = ABILITY_UI[st.you.roleType];
+  if (!ui) return;
+  $('abilityTitle').textContent = ui.label;
+  $('abilityHint').textContent = ui.hint || '';
+  const grid = $('abilityGrid');
+  grid.innerHTML = '';
+  const targets = st.players.filter((p) => p.alive && p.id !== st.you.id);
+  if (!targets.length) {
+    grid.innerHTML = '<div class="ability-empty">Nenhum alvo disponível.</div>';
+  }
+  for (const p of targets) {
+    const hex = C.colors.find((c) => c.id === p.color)?.hex || '#888';
+    const b = el('button', 'ability-target');
+    b.innerHTML = `<span class="at-dot" style="background:${hex}"></span><span class="at-name">${escapeHtml(p.name)}</span>`;
+    b.addEventListener('click', () => {
+      $('abilityModal').setAttribute('hidden', '');
+      emitAbility(p.id);
+    });
+    grid.append(b);
+  }
+  $('abilityModal').removeAttribute('hidden');
+}
+
+$('btnAbility').addEventListener('click', () => {
+  const ui = ABILITY_UI[C.state?.you?.roleType];
+  if (!ui) return;
+  if (ui.target) openAbilityModal();
+  else emitAbility(null);
+});
+$('abilityClose').addEventListener('click', () => $('abilityModal').setAttribute('hidden', ''));
+$('abilityModal').addEventListener('click', (e) => {
+  if (e.target === $('abilityModal')) $('abilityModal').setAttribute('hidden', '');
 });
 $('specialClose').addEventListener('click', closeSpecial);
 
@@ -1143,6 +1370,7 @@ function openTask(task, consoleId) {
         toast(`Tarefa concluída: ${task.name}`);
         sfx.taskDone();
         flashScreen('', 120);
+        taskDoneBurst();
         closeTask();
       } else if (task.totalSteps > 1) {
         toast(`Passo ${res.step}/${res.totalSteps}`);
@@ -1161,6 +1389,12 @@ function openTask(task, consoleId) {
   $('taskBody').innerHTML = '';
   $('taskBody').append(built.el);
   $('taskModal').removeAttribute('hidden');
+}
+
+function taskDoneBurst() {
+  const burst = el('div', 'task-done-burst', '✓');
+  document.body.append(burst);
+  setTimeout(() => burst.remove(), 780);
 }
 
 $('taskClose').addEventListener('click', closeTask);

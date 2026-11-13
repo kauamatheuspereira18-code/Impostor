@@ -295,6 +295,16 @@ io.on('connection', (socket) => {
     reply(cb, game.closeDoors(socket.id, roomId));
   });
 
+  socket.on('ability', (a, b) => {
+    const payload = typeof a === 'object' && a ? a : {};
+    const cb = ackArg(a, b);
+    const game = getGame(socket.id);
+    if (!game) return reply(cb, { error: 'Sem sala.' });
+    const res = game.useAbility(socket.id, payload.type, payload.targetId);
+    if (res?.error) socket.emit('toast', res.error);
+    reply(cb, res);
+  });
+
   socket.on('emergency', (a, b) => {
     const cb = ackArg(a, b);
     const game = getGame(socket.id);

@@ -836,3 +836,198 @@ html, body {
   color: var(--muted); border: 1px dashed rgba(150, 185, 235, 0.3);
   border-radius: 999px; padding: 3px 9px;
 }
+
+/* ================= habilidades de papel ================= */
+.action-ability {
+  --cd: 0;
+  background: radial-gradient(circle at 32% 28%, #8be7ff, #1d6fa8);
+  color: #04252f;
+}
+.action-ability::after {
+  content: '';
+  position: absolute; inset: -3px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: conic-gradient(rgba(6, 10, 16, 0.72) calc(var(--cd) * 1%), rgba(0, 0, 0, 0) 0);
+  opacity: var(--cd-on, 0);
+  transition: opacity 0.15s;
+}
+.action-ability .action-cd { background: rgba(0, 0, 0, 0.12); font-size: 20px; font-weight: 800; }
+.action-ability .action-ico { font-size: 20px; }
+.action-ability.pulse { animation: abilityPulse 1.3s ease-in-out infinite; }
+@keyframes abilityPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(120, 224, 255, 0.55); }
+  50% { box-shadow: 0 0 0 7px rgba(120, 224, 255, 0); }
+}
+
+.role-state { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.rs-chip {
+  font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 999px;
+  background: rgba(12, 22, 34, 0.82);
+  border: 1px solid rgba(140, 200, 255, 0.35);
+  color: #bfe6ff;
+  backdrop-filter: blur(6px);
+}
+
+.ability-hint { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
+.ability-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 8px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.ability-target {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 11px; border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(150, 190, 240, 0.22);
+  color: #eaf4ff; font: inherit; font-weight: 700; font-size: 13px;
+  cursor: pointer; text-align: left;
+  transition: transform 0.12s, background 0.12s, border-color 0.12s;
+}
+.ability-target:hover {
+  transform: translateY(-1px);
+  background: rgba(140, 210, 255, 0.16);
+  border-color: rgba(165, 225, 255, 0.6);
+}
+.at-dot {
+  width: 16px; height: 16px; border-radius: 50%;
+  box-shadow: inset 0 -2px 3px rgba(0, 0, 0, 0.35), 0 0 0 2px rgba(0, 0, 0, 0.35);
+  flex: 0 0 auto;
+}
+.ability-empty { color: var(--muted); font-size: 13px; padding: 6px 2px; }
+
+/* cartão de papel: times diferentes */
+.role-card[data-team='impostor'] .role-name { color: #ff7a86; }
+.role-card[data-team='crew'] .role-name { color: #9ae6ff; }
+.role-card[data-role='Shapeshifter'] .role-name { color: #cda2ff; }
+.role-card[data-role='Phantom'] .role-name { color: #a9c2ff; }
+.role-card[data-role='Viper'] .role-name { color: #86f58d; }
+
+/* papéis na sala de espera */
+.role-head-row { border-top: 1px solid rgba(150, 190, 240, 0.16); padding-top: 12px; }
+.role-row .setting-head span { display: flex; align-items: center; gap: 6px; }
+.role-team {
+  font-style: normal; font-size: 9px; letter-spacing: 0.8px; text-transform: uppercase;
+  padding: 2px 6px; border-radius: 999px;
+  background: rgba(150, 190, 240, 0.14); color: var(--muted);
+}
+.role-row[data-team='impostor'] .role-team { background: rgba(255, 90, 105, 0.16); color: #ff9aa4; }
+.role-note { margin: 4px 0 0; font-size: 11px; line-height: 1.35; color: var(--muted); }
+.role-row[data-team='impostor'] b { color: #ff8f9a; }
+
+/* ================= revelação de papel ================= */
+.role-reveal {
+  position: fixed; inset: 0; z-index: 60;
+  display: grid; place-items: center;
+  background: radial-gradient(circle at 50% 45%, rgba(6, 12, 22, 0.78), rgba(2, 4, 8, 0.96));
+  backdrop-filter: blur(3px);
+  opacity: 0; transition: opacity 0.26s ease;
+}
+.role-reveal.in { opacity: 1; }
+.role-reveal .rr-rays {
+  position: absolute; inset: -30%;
+  background: conic-gradient(from 0deg, rgba(120, 200, 255, 0.10) 0 6deg, transparent 6deg 24deg);
+  animation: rrSpin 26s linear infinite;
+  opacity: 0.6;
+  pointer-events: none;
+}
+@keyframes rrSpin { to { transform: rotate(360deg); } }
+
+.rr-card {
+  position: relative; text-align: center;
+  width: min(560px, 88vw);
+  padding: 30px 30px 24px;
+  border-radius: 26px;
+  background: linear-gradient(180deg, rgba(22, 34, 52, 0.96), rgba(10, 16, 26, 0.97));
+  border: 1px solid rgba(150, 200, 255, 0.22);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transform: scale(0.86) translateY(10px);
+  opacity: 0;
+  transition: transform 0.34s cubic-bezier(0.2, 1.4, 0.4, 1), opacity 0.28s ease;
+}
+.role-reveal.in .rr-card { transform: scale(1) translateY(0); opacity: 1; }
+
+.rr-team {
+  display: inline-block; font-size: 11px; letter-spacing: 2.4px; font-weight: 800;
+  padding: 5px 12px; border-radius: 999px; margin-bottom: 10px;
+}
+.rr-team.imp { background: rgba(255, 60, 80, 0.18); color: #ff9aa5; border: 1px solid rgba(255, 90, 110, 0.45); }
+.rr-team.crew { background: rgba(90, 200, 255, 0.16); color: #a9e6ff; border: 1px solid rgba(120, 210, 255, 0.4); }
+
+.rr-name {
+  margin: 0 0 8px; font-size: clamp(30px, 5vw, 44px); letter-spacing: 1px;
+  color: #f2f8ff; text-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+}
+.rr-name.imp { color: #ff6f7c; text-shadow: 0 0 26px rgba(255, 60, 80, 0.45), 0 6px 20px rgba(0, 0, 0, 0.6); }
+.rr-desc { margin: 0 auto 6px; max-width: 44ch; color: #dbe9f7; font-size: 14px; line-height: 1.5; }
+.rr-hint { margin: 0 auto 14px; max-width: 44ch; color: #8fb6d6; font-size: 12.5px; line-height: 1.45; }
+.rr-mates { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; margin-bottom: 14px; }
+.rr-mates-label { font-size: 10px; letter-spacing: 1.6px; text-transform: uppercase; color: #7f97b3; width: 100%; }
+.rr-mate {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 700; color: #e8f2ff;
+  background: rgba(255, 255, 255, 0.07); border-radius: 999px; padding: 4px 10px;
+}
+.rr-mate i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; box-shadow: inset 0 -2px 2px rgba(0, 0, 0, 0.4); }
+.rr-card .btn { min-width: 150px; }
+
+/* ================= transições de interface ================= */
+.modal .modal-card,
+.modal .task-card {
+  animation: modalIn 0.22s cubic-bezier(0.2, 1.3, 0.4, 1);
+}
+@keyframes modalIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
+.meeting { animation: meetingIn 0.3s ease-out; }
+.meeting .meeting-card { animation: meetingCardIn 0.34s cubic-bezier(0.2, 1.25, 0.4, 1); }
+@keyframes meetingIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes meetingCardIn {
+  from { opacity: 0; transform: translateY(18px) scale(0.965); }
+  to { opacity: 1; transform: none; }
+}
+
+/* vinheta vermelha de sabotagem crítica */
+body.sab-critical #screen-game::after {
+  content: '';
+  position: absolute; inset: 0; pointer-events: none; z-index: 12;
+  box-shadow: inset 0 0 120px 30px rgba(255, 40, 60, 0.35);
+  animation: critPulse 1.5s ease-in-out infinite;
+}
+@keyframes critPulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 0.95; }
+}
+
+/* flash de kill / reunião */
+.screen-flash.on { animation: flashPulse 0.5s ease-out; }
+@keyframes flashPulse {
+  0% { opacity: 0.75; }
+  100% { opacity: 0; }
+}
+
+/* entrada do HUD de objetivos */
+.objective { animation: objIn 0.25s ease-out; }
+@keyframes objIn {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* medalha de tarefa concluída */
+.task-done-burst {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  pointer-events: none; z-index: 40;
+  font-size: 64px; color: #7dffa8;
+  text-shadow: 0 0 24px rgba(90, 255, 160, 0.75);
+  animation: burst 0.75s ease-out forwards;
+}
+@keyframes burst {
+  0% { opacity: 0; transform: scale(0.5); }
+  35% { opacity: 1; transform: scale(1.1); }
+  100% { opacity: 0; transform: scale(1.35) translateY(-18px); }
+}

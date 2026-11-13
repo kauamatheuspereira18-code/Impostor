@@ -53,8 +53,70 @@ export const DEFAULT_SETTINGS = {
   rolePreset: 0,              // 0 = clássico, 1 = com papéis
   roles: {
     scientist: 0, engineer: 0, guardianAngel: 0, shapeshifter: 0,
-    noisemaker: 0, phantom: 0, tracker: 0,
+    noisemaker: 0, phantom: 0, tracker: 0, viper: 0,
   },
+};
+
+/* ------------------------------------------------------------------
+   Papéis do Among Us (2024) e o que cada um faz.
+   team: crew | impostor. ghost: só funciona depois de morto.
+   ------------------------------------------------------------------ */
+export const ROLE_INFO = {
+  Crewmate: {
+    team: 'crew', name: 'Tripulante', key: 'crewmate',
+    desc: 'Complete as tarefas ou descubra o impostor.',
+  },
+  Engineer: {
+    team: 'crew', name: 'Engenheiro', key: 'engineer', ability: 'vent',
+    desc: 'Pode entrar nos dutos por 5s. Recarga de 30s.',
+    hint: 'Use o duto para escapar sem ser visto.',
+  },
+  Scientist: {
+    team: 'crew', name: 'Cientista', key: 'scientist', ability: 'vitals',
+    desc: 'Vê os vitais de todos em qualquer lugar, gastando bateria.',
+    hint: 'A bateria recarrega com o tempo e ao completar tarefas.',
+  },
+  Noisemaker: {
+    team: 'crew', name: 'Barulhento', key: 'noisemaker', passive: true,
+    desc: 'Ao ser morto, dispara um alarme que todos veem e ouvem.',
+    hint: 'Sua morte não passa em branco.',
+  },
+  Tracker: {
+    team: 'crew', name: 'Rastreador', key: 'tracker', ability: 'track',
+    desc: 'Marca até 3 jogadores e vê a posição deles no mapa.',
+    hint: 'Marcações duram 20s e aparecem no mapa.',
+  },
+  'Guardian Angel': {
+    team: 'crew', name: 'Anjo da Guarda', key: 'guardianAngel', ability: 'shield', ghost: true,
+    desc: 'Depois de morrer, protege um vivo por 10s.',
+    hint: 'Um escudo impede o próximo abate.',
+  },
+  Shapeshifter: {
+    team: 'impostor', name: 'Metamorfo', key: 'shapeshifter', ability: 'shift',
+    desc: 'Assume a aparência de outro jogador por 10s.',
+    hint: 'Use para incriminar alguém. Recarga de 25s.',
+  },
+  Phantom: {
+    team: 'impostor', name: 'Fantasma', key: 'phantom', ability: 'phantom',
+    desc: 'Fica invisível por 5s (não pode matar enquanto invisível).',
+    hint: 'Desapareça para escapar de testemunhas.',
+  },
+  Viper: {
+    team: 'impostor', name: 'Víbora', key: 'viper', ability: 'venom',
+    desc: 'Cospe veneno: a vítima morre alguns segundos depois.',
+    hint: 'O veneno mata longe de você. Recarga de 30s.',
+  },
+};
+
+/* Números das habilidades (como no jogo). */
+export const ABILITY = {
+  Engineer: { ventTime: 5, cooldown: 30 },
+  Scientist: { drain: 12, recharge: 6 },
+  Tracker: { uses: 3, duration: 20, cooldown: 25 },
+  'Guardian Angel': { shield: 10, cooldown: 60 },
+  Shapeshifter: { shift: 10, cooldown: 25 },
+  Phantom: { invisibility: 5, cooldown: 30 },
+  Viper: { delay: 5, cooldown: 30, range: 3.8 },
 };
 
 /* Presets de regras do jogo original (RulesPresets.json). */
@@ -70,6 +132,15 @@ export const RULE_PRESETS = {
   expert: {
     label: 'Especialista',
     values: { numImpostors: 2, discussionTime: 30, votingTime: 60, killCooldown: 20, playerSpeed: 0.75, crewVision: 0.6, impostorVision: 1.8, numCommonTasks: 1, numLongTasks: 2, numShortTasks: 3, emergencyMeetings: 1 },
+  },
+  roles: {
+    label: 'Com papéis',
+    values: {
+      numImpostors: 2, discussionTime: 15, votingTime: 120, killCooldown: 25,
+      playerSpeed: 0.85, crewVision: 1.0, impostorVision: 1.75,
+      numCommonTasks: 1, numLongTasks: 1, numShortTasks: 2, emergencyMeetings: 1,
+      roles: { scientist: 1, engineer: 1, guardianAngel: 1, shapeshifter: 1, noisemaker: 1, phantom: 0, tracker: 1, viper: 0 },
+    },
   },
   chaos: {
     label: 'Caos',

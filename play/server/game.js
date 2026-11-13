@@ -1,5 +1,5 @@
 import { COLORS, MAPS } from '../shared/mapdata.js';
-import { GAME_CONSTANTS, DEFAULT_SETTINGS, MAP_SABOTAGES, SABOTAGE_INFO } from '../shared/rules.js';
+import { GAME_CONSTANTS, DEFAULT_SETTINGS, MAP_SABOTAGES, SABOTAGE_INFO, ROLE_INFO, ABILITY } from '../shared/rules.js';
 import { makeShip } from './ship.js';
 
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -41,6 +41,8 @@ export class Game {
     this.doorsReadyAt = {};
     this.lastKill = null;
     this.meetingEndsAt = 0;
+    this.noiseAlarms = [];
+    this.lastAbility = null;
   }
 
   /* ============================ jogadores ============================ */
@@ -197,6 +199,13 @@ export class Game {
     s.numLongTasks = clamp(Math.round(s.numLongTasks), 0, 4);
     s.numShortTasks = clamp(Math.round(s.numShortTasks), 0, 6);
     s.emergencyMeetings = clamp(Math.round(s.emergencyMeetings), 0, 9);
+    if (this.settings.roles && typeof this.settings.roles === 'object') {
+      const clean = {};
+      for (const key of Object.keys(DEFAULT_SETTINGS.roles)) {
+        clean[key] = clamp(Math.round(Number(this.settings.roles[key]) || 0), 0, 3);
+      }
+      this.settings.roles = clean;
+    }
     this.push();
   }
 
@@ -228,6 +237,17 @@ export class Game {
     for (const p of players) {
       p.role = impostorIds.has(p.id) ? 'impostor' : 'crew';
       p.roleType = impostorIds.has(p.id) ? 'Impostor' : 'Crewmate';
+      p.abilityReadyAt = 0;
+      p.shiftTo = null;
+      p.shiftUntil = 0;
+      p.phantomUntil = 0;
+      p.shieldUntil = 0;
+      p.poisonedUntil = 0;
+      p.poisonedBy = null;
+      p.tracked = [];
+      p.trackerUses = ABILITY.Tracker.uses;
+      p.battery = 100;
+      p.vitalsOpen = false;
       p.alive = true;
       p.kills = 0;
       p.inVent = false;
@@ -244,6 +264,8 @@ export class Game {
       p.tasks = [];
     }
 
+    this.assignRoles(players, impostorIds);
+
     // distribui tarefas (2 comuns iguais para todos, longas e curtas por jogador)
     const crew = players.filter((p) => p.role === 'crew');
     for (const task of this.tasks) task.assignedTo = [];
@@ -253,6 +275,129 @@ export class Game {
     this.log.length = 0;
     this.log.push({ type: 'system', text: 'A partida começou!' });
     this.startTicking();
+    this.push();
+    return { ok: true };
+  }
+
+  /** Sorteia os papéis opcionais (metamorfo, fantasma, víbora, engenheiro...). */
+  assignRoles(players, impostorIds) {
+    const wants = this.settings.roles || {};
+    const shuffle = (arr) => [...arr].sort(() => Math.random() - 0.5);
+    const impostors = shuffle(players.filter((p) => p.role === 'impostor'));
+    const crew = shuffle(players.filter((p) => p.role === 'crew'));
+
+    // papéis de impostor (cada impostor recebe no máximo um)
+    const impPool = [];
+    for (const [key, type] of [['shapeshifter', 'Shapeshifter'], ['phantom', 'Phantom'], ['viper', 'Viper']]) {
+      const n = clamp(Math.round(wants[key] || 0), 0, 3);
+      for (let i = 0; i < n; i++) impPool.push(type);
+    }
+    shuffle(impPool);
+    impostors.forEach((p, i) => {
+      if (impPool[i]) p.roleType = impPool[i];
+    });
+
+    // papéis de tripulante
+    const crewPool = [];
+    for (const [key, type] of [
+      ['engineer', 'Engineer'], ['scientist', 'Scientist'], ['noisemaker', 'Noisemaker'],
+      ['tracker', 'Tracker'], ['guardianAngel', 'Guardian Angel'],
+    ]) {
+      const n = clamp(Math.round(wants[key] || 0), 0, 3);
+      for (let i = 0; i < n; i++) crewPool.push(type);
+    }
+    shuffle(crewPool);
+    crew.forEach((p, i) => {
+      if (crewPool[i]) p.roleType = crewPool[i];
+    });
+
+    // garante que o jogador humano receba um papel quando a partida tem papéis
+    const plain = (p) => p.roleType === 'Impostor' || p.roleType === 'Crewmate';
+    const hasAny = players.some((p) => !plain(p));
+    const humanHas = players.some((p) => !p.isBot && !plain(p));
+    if (hasAny && !humanHas) {
+      const human = players.find((p) => !p.isBot);
+      const donor = players.find((p) => p.isBot && !plain(p) && p.role === human?.role);
+      if (human && donor) {
+        human.roleType = donor.roleType;
+        donor.roleType = human.role === 'impostor' ? 'Impostor' : 'Crewmate';
+      }
+    }
+
+    for (const p of players) {
+      p.abilityReadyAt = 0;
+      p.trackerUses = ABILITY.Tracker.uses;
+      p.battery = 100;
+    }
+  }
+
+  /** Habilidade de papel (metamorfo, fantasma, víbora, rastreador, anjo...). */
+  useAbility(playerId, type, targetId) {
+    const p = this.players.get(playerId);
+    if (!p) return { error: 'Jogador inválido.' };
+    if (this.state !== 'tasks') return { error: 'Não é possível usar agora.' };
+    const now = Date.now();
+    const ability = ABILITY[p.roleType];
+    if (!ability) return { error: 'Seu papel não tem habilidade.' };
+    if (now < (p.abilityReadyAt || 0)) {
+      return { error: `Habilidade em recarga (${Math.ceil((p.abilityReadyAt - now) / 1000)}s).` };
+    }
+    if (p.roleType === 'Guardian Angel' && p.alive) return { error: 'O escudo só funciona depois de morrer.' };
+    if (!p.alive && p.roleType !== 'Guardian Angel') return { error: 'Você está morto.' };
+
+    const target = targetId ? this.players.get(targetId) : null;
+    switch (p.roleType) {
+      case 'Shapeshifter': {
+        if (!target || !target.alive || target.id === p.id) return { error: 'Escolha um jogador vivo.' };
+        p.shiftTo = target.id;
+        p.shiftUntil = now + ability.shift * 1000;
+        p.abilityReadyAt = now + ability.cooldown * 1000;
+        this.log.push({ type: 'system', text: `${p.name} se transformou.` });
+        break;
+      }
+      case 'Phantom': {
+        if (p.inVent) return { error: 'Saia do duto primeiro.' };
+        p.phantomUntil = now + ability.invisibility * 1000;
+        p.abilityReadyAt = now + ability.cooldown * 1000;
+        break;
+      }
+      case 'Viper': {
+        if (!target || !target.alive) return { error: 'Escolha um jogador vivo.' };
+        if (target.role === 'impostor') return { error: 'Não pode envenenar outro impostor.' };
+        if (dist(p, target) > ability.range) return { error: 'Alvo fora de alcance.' };
+        target.poisonedUntil = now + ability.delay * 1000;
+        target.poisonedBy = p.id;
+        p.abilityReadyAt = now + ability.cooldown * 1000;
+        this.log.push({ type: 'system', text: `${p.name} cuspiu veneno.` });
+        break;
+      }
+      case 'Tracker': {
+        if (!target || !target.alive || target.id === p.id) return { error: 'Escolha um jogador vivo.' };
+        if (p.trackerUses <= 0) return { error: 'Sem marcações restantes.' };
+        p.trackerUses -= 1;
+        p.tracked = (p.tracked || []).filter((t) => t.until > now);
+        p.tracked.push({ id: target.id, until: now + ability.duration * 1000 });
+        p.abilityReadyAt = now + ability.cooldown * 1000;
+        break;
+      }
+      case 'Guardian Angel': {
+        if (!target || !target.alive) return { error: 'Escolha um jogador vivo.' };
+        target.shieldUntil = now + ability.shield * 1000;
+        p.abilityReadyAt = now + ability.cooldown * 1000;
+        break;
+      }
+      case 'Scientist': {
+        p.vitalsOpen = true;
+        p.vitalsUntil = now + 5000;
+        break;
+      }
+      case 'Engineer': {
+        return { error: 'Use o botão do duto.' };
+      }
+      default:
+        return { error: 'Sem habilidade.' };
+    }
+    this.lastAbility = { type: p.roleType, by: p.id, targetId: target?.id || null, at: now };
     this.push();
     return { ok: true };
   }
@@ -360,10 +505,62 @@ export class Game {
       if (this.state === 'starting' && now - this.startedAt > 3000) this.state = 'tasks';
       this.tickBots(dt, now);
       this.tickSabotage(now);
+      this.tickAbilities(dt, now);
     } else if (this.state === 'meeting') {
       this.tickMeeting(now);
     }
     this.push();
+  }
+
+  /** Efeitos de papéis: veneno, bateria do cientista, tempo no duto. */
+  tickAbilities(dt, now) {
+    for (const p of this.players.values()) {
+      // engenheiro só pode ficar 5s no duto
+      if (p.inVent && p.roleType === 'Engineer' && p.ventEnteredAt && now - p.ventEnteredAt > ABILITY.Engineer.ventTime * 1000) {
+        this.exitVent(p.id);
+        this.log.push({ type: 'system', text: `${p.name} saiu do duto no limite.` });
+      }
+      // veneno da víbora
+      if (p.alive && p.poisonedUntil && now >= p.poisonedUntil) {
+        p.alive = false;
+        p.inVent = false;
+        p.killedAt = now;
+        p.poisonedUntil = 0;
+        const killer = this.players.get(p.poisonedBy);
+        if (killer) killer.kills = (killer.kills || 0) + 1;
+        this.bodies.push({
+          id: 'body_' + uid(5),
+          playerId: p.id,
+          color: p.color,
+          name: p.name,
+          x: p.x,
+          y: p.y,
+          room: this.ship.roomAt(p.x, p.y),
+          at: now,
+          poisoned: true,
+        });
+        this.lastKill = {
+          at: now, x: p.x, y: p.y, victimId: p.id, victimColor: p.color,
+          killerId: p.poisonedBy, room: this.ship.roomAt(p.x, p.y), poisoned: true,
+        };
+        this.log.push({ type: 'system', text: `${p.name} morreu envenenado.` });
+        this.checkWin();
+      }
+      // bateria do cientista
+      if (p.roleType === 'Scientist') {
+        if (p.vitalsOpen) {
+          p.battery = Math.max(0, (p.battery ?? 100) - ABILITY.Scientist.drain * dt);
+          if (now >= (p.vitalsUntil || 0) || p.battery <= 0) p.vitalsOpen = false;
+        } else if (p.alive) {
+          p.battery = Math.min(100, (p.battery ?? 100) + ABILITY.Scientist.recharge * dt);
+        }
+      }
+      // expira metamorfose/fantasma
+      if (p.shiftUntil && now >= p.shiftUntil) { p.shiftTo = null; p.shiftUntil = 0; }
+      if (p.phantomUntil && now >= p.phantomUntil) p.phantomUntil = 0;
+      p.tracked = (p.tracked || []).filter((t) => t.until > now);
+    }
+    this.noiseAlarms = this.noiseAlarms.filter((a) => a.until > now);
   }
 
   /* ============================ movimento ============================ */
@@ -496,9 +693,12 @@ export class Game {
     if (Date.now() < killer.killReadyAt) return { error: 'Aguarde o cooldown do kill.' };
     const range = GAME_CONSTANTS.KILL_DISTANCES[this.settings.killDistance] || 1.8;
     if (dist(killer, target) > range) return { error: 'Alvo fora de alcance.' };
+    if ((target.shieldUntil || 0) > Date.now()) return { error: 'O Anjo da Guarda protegeu esse jogador.' };
+    if ((killer.phantomUntil || 0) > Date.now()) return { error: 'Você está invisível: não pode matar.' };
 
     target.alive = false;
     target.inVent = false;
+    target.poisonedUntil = 0;
     target.killedAt = Date.now();
     target.deathAt = Date.now();
     this.lastKill = {
@@ -515,6 +715,10 @@ export class Game {
     killer.killReadyAt = Date.now() + this.settings.killCooldown * 1000;
     // bots: ~55% do cooldown humano para a partida não arrastar
     if (killer.isBot) killer.killReadyAt = Date.now() + Math.max(9000, this.settings.killCooldown * 550);
+    if (target.roleType === 'Noisemaker') {
+      this.noiseAlarms.push({ x: target.x, y: target.y, at: Date.now(), until: Date.now() + 5000, name: target.name });
+      this.log.push({ type: 'system', text: `ALARME: ${target.name} era o Barulhento!` });
+    }
     this.bodies.push({
       id: 'body_' + uid(5),
       playerId: target.id,
@@ -542,13 +746,20 @@ export class Game {
 
   enterVent(playerId, ventId) {
     const p = this.players.get(playerId);
-    if (this.state !== 'tasks' || !p || !p.alive || p.role !== 'impostor') return { error: 'Só impostores usam dutos.' };
+    const canVent = p && (p.role === 'impostor' || p.roleType === 'Engineer');
+    if (this.state !== 'tasks' || !p || !p.alive || !canVent) return { error: 'Só impostores e engenheiros usam dutos.' };
+    if (p.roleType === 'Engineer') {
+      if (Date.now() < (p.abilityReadyAt || 0)) {
+        return { error: `Duto em recarga (${Math.ceil((p.abilityReadyAt - Date.now()) / 1000)}s).` };
+      }
+    }
     const vent = this.ship.ventById(ventId);
     if (!vent) return { error: 'Duto inválido.' };
     if (dist(p, vent) > 1.6) return { error: 'Longe do duto.' };
     p.inVent = true;
     p.ventId = vent.id;
     p.ventChain = 0;
+    p.ventEnteredAt = Date.now();
     p.x = vent.x;
     p.y = vent.y;
     this.push();
@@ -571,6 +782,9 @@ export class Game {
   exitVent(playerId) {
     const p = this.players.get(playerId);
     if (!p?.inVent) return { error: 'Você não está em um duto.' };
+    if (p.roleType === 'Engineer') {
+      p.abilityReadyAt = Date.now() + ABILITY.Engineer.cooldown * 1000;
+    }
     const vent = this.ship.ventById(p.ventId);
     p.inVent = false;
     p.ventId = null;
@@ -703,6 +917,13 @@ export class Game {
       p.voted = false;
       p.inVent = false;
       p.ventId = null;
+      p.poisonedUntil = 0;
+      p.poisonedBy = null;
+      p.shieldUntil = 0;
+      p.phantomUntil = 0;
+      p.shiftTo = null;
+      p.shiftUntil = 0;
+      p.vitalsOpen = false;
       if (p.alive) {
         const spawn = this.ship.randomSpawn(this.ship.data.spawn.meeting);
         p.x = spawn.x;
@@ -981,6 +1202,22 @@ export class Game {
       const arriveDist = goal.type === 'kill' ? 0.35 : 0.55;
       if (d > arriveDist) {
         const step = speed * dt;
+
+        // anti-travamento: se ficou 2s sem sair do lugar, empurra para um lado
+        if (!bs.lastPosAt || now - bs.lastPosAt > 2000) {
+          const walked = bs.lastPos ? Math.hypot(p.x - bs.lastPos.x, p.y - bs.lastPos.y) : 1;
+          if (bs.lastPos && walked < 0.12) {
+            const a = Math.random() * Math.PI * 2;
+            for (const off of [0, 0.7, -0.7, 1.4, -1.4, 2.1, -2.1, 3.14]) {
+              const alt = this.ship.move(p.x, p.y, Math.cos(a + off) * step * 3, Math.sin(a + off) * step * 3);
+              if (Math.hypot(alt.x - p.x, alt.y - p.y) > 1e-4) { p.x = alt.x; p.y = alt.y; break; }
+            }
+            bs.path = null;
+            bs.stuck = 0;
+          }
+          bs.lastPos = { x: p.x, y: p.y };
+          bs.lastPosAt = now;
+        }
         // waypoint: se o caminho estiver livre, vai reto; senão segue a rota em grade
         if (!bs.path || bs.pathGoal !== `${goal.x.toFixed(2)},${goal.y.toFixed(2)}` || bs.pathIndex >= (bs.path?.length || 0)) {
           bs.path = this.ship.findPath(p, goal);
@@ -1227,10 +1464,19 @@ export class Game {
 
     const players = [...this.players.values()].map((p) => {
       const revealRole = this.state === 'ended' || p.id === forId || (isImp && p.role === 'impostor');
+      const shifted = (p.shiftTo && (p.shiftUntil || 0) > now) ? this.players.get(p.shiftTo) : null;
+      const invisible = (p.phantomUntil || 0) > now;
       return {
         id: p.id,
-        name: p.name,
-        color: p.color,
+        name: (shifted && p.id !== forId) ? shifted.name : p.name,
+        color: (shifted && p.id !== forId) ? shifted.color : p.color,
+        realName: revealRole ? p.name : undefined,
+        displayName: shifted ? shifted.name : p.name,
+        shifted: !!shifted,
+        hidden: invisible && p.id !== forId && !(isImp && p.role === 'impostor'),
+        shielded: (p.shieldUntil || 0) > now,
+        poisoned: (p.poisonedUntil || 0) > now,
+        roleType: revealRole ? p.roleType : null,
         x: p.x,
         y: p.y,
         facing: p.facing,
@@ -1283,7 +1529,23 @@ export class Game {
         sabotageReadyAt: this.sabotageReadyAt,
         doorsReadyAt: this.doorsReadyAt,
         connected: me.connected !== false,
-        roleName: me.role === 'impostor' ? 'Impostor' : (this.settings.roles?.engineer && me.roleType === 'Engineer' ? 'Engenheiro' : 'Tripulante'),
+        roleType: me.roleType,
+        roleName: ROLE_INFO[me.roleType]?.name || (me.role === 'impostor' ? 'Impostor' : 'Tripulante'),
+        roleDesc: ROLE_INFO[me.roleType]?.desc || '',
+        roleHint: ROLE_INFO[me.roleType]?.hint || '',
+        roleTeam: ROLE_INFO[me.roleType]?.team || me.role,
+        abilityReadyAt: me.abilityReadyAt || 0,
+        abilityCooldownMs: (ABILITY[me.roleType]?.cooldown || 0) * 1000,
+        shiftUntil: me.shiftUntil || 0,
+        shiftName: me.shiftTo ? this.players.get(me.shiftTo)?.name || null : null,
+        phantomUntil: me.phantomUntil || 0,
+        shieldUntil: me.shieldUntil || 0,
+        poisonedUntil: me.poisonedUntil || 0,
+        battery: Math.round(me.battery ?? 100),
+        trackerUses: me.trackerUses ?? 0,
+        tracked: (me.tracked || []).filter((t) => t.until > Date.now()),
+        canVent: me.role === 'impostor' || me.roleType === 'Engineer',
+        ventEnteredAt: me.ventEnteredAt || 0,
         impostorTeammates: isImp
           ? [...this.players.values()].filter((p) => p.role === 'impostor' && p.id !== forId).map((p) => ({ id: p.id, name: p.name, color: p.color }))
           : [],
@@ -1302,6 +1564,7 @@ export class Game {
       commsDown: this.sabotage?.type === 'comms',
       meeting: this.meeting,
       lastKill: this.lastKill,
+      noiseAlarms: this.noiseAlarms.map((a) => ({ x: a.x, y: a.y, at: a.at, until: a.until, name: a.name })),
       lastEject: this.lastEject || null,
       doorsReadyAt: this.doorsReadyAt,
       votes: this.state === 'meeting'

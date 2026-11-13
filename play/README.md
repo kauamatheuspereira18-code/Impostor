@@ -61,12 +61,15 @@ A partida é autoritativa no servidor, então todos veem a mesma coisa.
 | **Animação** | Caminhada com pernas alternadas, mochila, viseira com reflexo, tremor de câmera no abate, respingos, duto abrindo, portas deslizando, visão em círculo. |
 | **Geometria** | 14 salas com planta própria (octógono na Cafeteria, canto cortado em Armas, bico na Navegação, Armazém em L) e 21 corredores ligados de acordo com o mapa clássico, colisão por polígono. |
 | **Tarefas visuais** | Scan na Enfermaria, tiros de asteroide em Armas e anéis em Escudos aparecem para todos, como no jogo. |
+| **Papéis** | Até 3 impostores com Metamorfo, Fantasma e Víbora; tripulantes com Engenheiro, Cientista, Barulhento, Rastreador, Anjo da Guarda ou sem papel. Configurável de 0 a 3 de cada no lobby. |
+| **Habilidades** | Botão de habilidade com recarga em anel, escolha de alvo, transformação com faíscas, invisibilidade, veneno, escudo, marcações no mapa, vitais com bateria e alarme do Barulhento. |
+| **Revelação de papel** | Cartão animado no começo de cada partida com papel, equipe, descrição e cúmplices. |
 
 ## Controles
 
 - **WASD/setas** ou arraste o dedo na tela para andar.
 - **E / espaço**: usar console, botão de emergência, reportar corpo.
-- **Q**: matar (impostor) · **R**: sabotar · **F**: portas · **Tab**: mapa · **M**: som.
+- **Q**: matar (impostor) · **R**: sabotar · **F**: habilidade do papel · **Tab**: mapa · **M**: som.
 - **Enter**: enviar mensagem no chat.
 
 ## Verificações
@@ -78,6 +81,7 @@ node tests/new_game.test.mjs     # socket: lobby, tarefas, sabotagem, reunião e
 node tests/crewwin.test.mjs      # vitória dos tripulantes
 node tests/taskwin.test.mjs      # vitória por tarefas (com fantasma terminando as dele)
 node tests/fidelity.test.mjs     # abate, tarefa de fantasma, portas, O₂, ejeção
+node tests/roles.test.mjs        # 8 papéis: metamorfo, fantasma, víbora, engenheiro, cientista, barulhento, rastreador, anjo
 node tests/fullgame2.test.mjs    # partida completa só com bots
 node tests/online.test.mjs       # criar/entrar/lista pública/reconexão/kick (servidor rodando)
 ```
@@ -99,8 +103,25 @@ com vencedor definido.
 ```
 
 Também aceita `PORT` e `HOST`. As regras (jogadores, impostores, kill, velocidade, visão,
-tarefas, tempo de discussão/votação, reuniões de emergência, barra de tarefas, fantasmas)
-são ajustadas no lobby pelo host, com presets Clássico/Casual/Especialista/Caos.
+tarefas, tempo de discussão/votação, reuniões de emergência, barra de tarefas, fantasmas e papéis)
+são ajustadas no lobby pelo host, com presets Clássico/Casual/Especialista/**Com papéis**/Caos.
+
+## Papéis
+
+O host liga de 0 a 3 de cada papel no lobby. Um impostor recebe no máximo um papel especial;
+o sorteio é aleatório a cada partida e o jogador humano sempre recebe um papel quando algum
+está ligado.
+
+| Papel | Time | O que faz |
+| --- | --- | --- |
+| Metamorfo | impostor | Assume a aparência de outro jogador por 10s (recarga 25s). |
+| Fantasma | impostor | Fica invisível por 5s (recarga 30s); não pode matar enquanto invisível. |
+| Víbora | impostor | Cospe veneno a curta distância: a vítima morre em 5s (recarga 30s). |
+| Engenheiro | tripulante | Entra nos dutos por até 5s (recarga 30s). |
+| Cientista | tripulante | Vê os vitais em qualquer lugar; a bateria cai 12/s e recarrega 6/s. |
+| Barulhento | tripulante | Ao ser morto, dispara um alarme sonoro e visual no local. |
+| Rastreador | tripulante | Marca até 3 jogadores por 20s e vê a posição no mapa (recarga 25s). |
+| Anjo da Guarda | tripulante | Depois de morto, protege um vivo com escudo por 10s (recarga 60s). |
 
 ## Docker
 
@@ -145,7 +166,8 @@ Comparado ao cliente oficial, ainda não estão aqui:
 
 - **Outros mapas**: por escolha de escopo, o jogo fica só no **The Skeld** clássico; a
   geometria dos demais não é usada.
-- **Papéis opcionais** (Engenheiro, Cientista, Anjo, Shapeshifter, Fantasma, Rastreador).
+- **Bots usando habilidades**: os bots recebem papéis, mas não acionam Metamorfo/Fantasma/Víbora
+  nem o escudo do Anjo — só matam, fazem tarefas, reportam e votam.
 - **Cosméticos** (chapéus, pets, skins) e progressão.
 - **Matchmaking público com contas/regiões** — hoje as salas são por código e por lista.
 - **Geometria exata do mesh original** do Unity: as plantas foram reconstruídas a partir do
