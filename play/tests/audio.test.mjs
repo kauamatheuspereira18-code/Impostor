@@ -53,7 +53,7 @@ const jogos = [...tasksSrc.matchAll(/^  ([a-z0-9]+): \{ title:/gm)].map((m) => m
 const cases = [...sfxSrc.matchAll(/case '([a-z0-9]+)': \/\//g)].map((m) => m[1]);
 check('todos os minigames cadastrados', jogos.length >= 16, String(jogos.length));
 for (const j of jogos) check(`som próprio de "${j}"`, cases.includes(j));
-check('seletor de som de tarefa no help', /id="taskSoundSel"/.test(html) && /sfx\.task\(\$\('taskSoundSel'\)/.test(appSrc));
+check('seletor de som de tarefa no help', /id="taskSoundSel"/.test(html) && /sfx\.task\(selTarefa\?\.value/.test(appSrc));
 check('alarme crítico liga e desliga', perto(/startAlarm\(\)/) && perto(/stopAlarm\(\)/));
 check('ambiente da nave toca nas tarefas e para fora delas', perto(/startAmbient\(\)/) && perto(/stopAmbient\(\)/));
 

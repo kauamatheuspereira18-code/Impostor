@@ -331,16 +331,19 @@ document.addEventListener('mouseover', (e) => {
 $('btnHelp').addEventListener('click', () => $('helpModal').removeAttribute('hidden'));
 
 // cada tarefa tem som próprio: o seletor do help toca o som daquela tarefa
-for (const [game, info] of Object.entries(TASK_GAMES)) {
-  if (game === 'multistep') continue;
-  const opt = document.createElement('option');
-  opt.value = game;
-  opt.textContent = info.title;
-  $('taskSoundSel').append(opt);
+const selTarefa = $('taskSoundSel');
+if (selTarefa) {
+  for (const [game, info] of Object.entries(TASK_GAMES)) {
+    if (game === 'multistep') continue;
+    const opt = document.createElement('option');
+    opt.value = game;
+    opt.textContent = info.title;
+    selTarefa.append(opt);
+  }
 }
-$('taskSoundPlay').addEventListener('click', () => {
+$('taskSoundPlay')?.addEventListener('click', () => {
   sfx.init();
-  sfx.task($('taskSoundSel').value, true);
+  sfx.task(selTarefa?.value || 'upload', true);
 });
 
 // banco de sons do help: toca cada efeito para conferir o áudio do navegador

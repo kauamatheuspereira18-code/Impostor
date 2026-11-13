@@ -94,8 +94,11 @@ node tests/fullgame2.test.mjs    # partida completa só com bots
 node tests/online.test.mjs       # criar/entrar/lista pública/reconexão/kick (servidor rodando)
 ```
 
-Resultado atual: `MAPA OK`, `fails = 0` em todos, partida completa terminando em ~1 a 3 minutos
-com vencedor definido.
+Também dá para rodar por npm: `npm test` (áudio + ejeção + papéis + mapa),
+`npm run test:game`, `npm run test:full` e `npm run test:online` (com o servidor no ar).
+
+Resultado atual: `MAPA OK`, `TUDO OK`/`fails = 0` em todos, partida completa terminando em ~1 a 3
+minutos com vencedor definido.
 
 ## Configuração
 
