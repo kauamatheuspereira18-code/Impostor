@@ -38,6 +38,7 @@ const C = {
   lastEjectAt: 0,
   revealKey: 0,
   lastAlarmAt: 0,
+  lastVentAt: 0,
   revealTimer: null,
   mapOpen: false,
   muted: false,
@@ -724,6 +725,14 @@ function renderHud(st) {
 
   // revelação de papel (uma vez por partida)
   maybeRoleReveal(st);
+
+  // vapor do duto quando alguém entra ou sai
+  const ventFx = st.lastVent;
+  if (ventFx && C.lastVentAt !== ventFx.at) {
+    C.lastVentAt = ventFx.at;
+    renderer.ventPuff(ventFx.x, ventFx.y, ventFx.entering);
+    if (ventFx.playerId !== st.you.id) sfx.vent();
+  }
 
   // alarme do barulhento (som + aviso)
   const alarms = st.noiseAlarms || [];

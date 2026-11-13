@@ -43,6 +43,7 @@ export class Game {
     this.meetingEndsAt = 0;
     this.noiseAlarms = [];
     this.lastAbility = null;
+    this.lastVent = null;
   }
 
   /* ============================ jogadores ============================ */
@@ -762,6 +763,7 @@ export class Game {
     p.ventEnteredAt = Date.now();
     p.x = vent.x;
     p.y = vent.y;
+    this.lastVent = { playerId: p.id, x: vent.x, y: vent.y, at: Date.now(), entering: true };
     this.push();
     return { ok: true };
   }
@@ -793,6 +795,7 @@ export class Game {
       const spot = this.ship.move(vent.x, vent.y, 0.9, 0.9);
       p.x = spot.x;
       p.y = spot.y;
+      this.lastVent = { playerId: p.id, x: vent.x, y: vent.y, at: Date.now(), entering: false };
     }
     this.push();
     return { ok: true };
@@ -1564,6 +1567,7 @@ export class Game {
       commsDown: this.sabotage?.type === 'comms',
       meeting: this.meeting,
       lastKill: this.lastKill,
+      lastVent: this.lastVent || null,
       noiseAlarms: this.noiseAlarms.map((a) => ({ x: a.x, y: a.y, at: a.at, until: a.until, name: a.name })),
       lastEject: this.lastEject || null,
       doorsReadyAt: this.doorsReadyAt,

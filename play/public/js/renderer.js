@@ -69,6 +69,10 @@ export class Renderer {
   }
 
   /** Efeito de tarefa visual (scan, asteroides, escudos) visto por todos. */
+  ventPuff(x, y, entering = true) {
+    this.visuals.push({ kind: 'vent', x, y, t0: performance.now(), dur: 620, entering, seed: Math.random() * 6.28 });
+  }
+
   visualTask(kind, x, y) {
     const dur = kind === 'scan' ? 4200 : kind === 'asteroids' ? 1800 : 2600;
     this.visuals.push({ kind, x, y, t0: performance.now(), dur });
@@ -802,6 +806,24 @@ export class Renderer {
           ctx.ellipse(0, z * 0.2 - k * z * 1.5, z * (0.3 + k * 0.25), z * (0.1 + k * 0.06), 0, 0, Math.PI * 2);
           ctx.stroke();
         }
+      } else if (v.kind === 'vent') {
+        // nuvem de vapor quando alguém entra ou sai do duto
+        const open = v.entering ? Math.min(1, t * 3) : Math.max(0, 1 - t * 1.6);
+        for (let i = 0; i < 9; i++) {
+          const a = (i / 9) * Math.PI * 2 + v.seed;
+          const rr = z * (0.18 + open * 0.55) * (0.7 + 0.5 * Math.sin(i * 2.7 + t * 6));
+          ctx.globalAlpha = (1 - t) * 0.5;
+          ctx.fillStyle = i % 2 ? '#cfe0f2' : '#9fb6cf';
+          ctx.beginPath();
+          ctx.arc(Math.cos(a) * rr, Math.sin(a) * rr * 0.75, z * 0.09 * (1 - t * 0.6), 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = (1 - t) * 0.55;
+        ctx.strokeStyle = '#dbe9f7';
+        ctx.lineWidth = Math.max(1, z * 0.035);
+        ctx.beginPath();
+        ctx.ellipse(0, 0, z * (0.25 + t * 0.5), z * (0.16 + t * 0.32), 0, 0, Math.PI * 2);
+        ctx.stroke();
       } else if (v.kind === 'asteroids') {
         // tiros saindo do console de Armas para o espaço
         for (let i = 0; i < 9; i++) {
