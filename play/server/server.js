@@ -39,7 +39,9 @@ app.get('/api/info', (req, res) => {
   res.json({
     name: 'Impostor Play',
     gameDataVersion: GAME_DATA_VERSION,
-    colors: COLORS.length,
+    // lista completa (o cliente monta a grade de cores com ela)
+    colors: COLORS,
+    colorCount: COLORS.length,
     presets: RULE_PRESETS,
     defaults: DEFAULT_SETTINGS,
     games: [...games.values()].filter((g) => g.state === 'lobby').length,

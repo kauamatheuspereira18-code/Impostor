@@ -414,8 +414,23 @@ function syncLocal(me) {
 }
 
 /* ================================================================
-   LOOP DE RENDER
+   GEOMETRIA / LOOP DE RENDER
    ================================================================ */
+/** Ponto dentro da planta da sala (polígonos). */
+function pointInRoom(room, x, y) {
+  for (const shape of room.shapes || []) {
+    const pts = shape.points || [];
+    let inside = false;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const [xi, yi] = pts[i];
+      const [xj, yj] = pts[j];
+      if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    if (inside) return true;
+  }
+  return false;
+}
+
 let lastFrame = performance.now();
 function frame(now) {
   const dt = Math.min(0.05, (now - lastFrame) / 1000);
@@ -599,7 +614,7 @@ function updateActionAvailability() {
     useBtn.classList.add('pulse');
   } else if (st.sabotage && alive) {
     const room = st.ship.spaces.find((s) => s.id === st.sabotage.roomId);
-    const here = room && room.parts.some(([x1, y1, x2, y2]) => C.local.x >= x1 && C.local.x <= x2 && C.local.y >= y1 && C.local.y <= y2);
+    const here = room && pointInRoom(room, C.local.x, C.local.y);
     useBtn.hidden = !here;
     useBtn.disabled = false;
     useBtn.dataset.mode = 'fix';

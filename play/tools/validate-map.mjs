@@ -5,14 +5,29 @@
  *
  * Uso: node tools/validate-map.mjs
  */
-import { ROOMS, CORRIDORS, EMERGENCY, VIEW } from '../shared/skeld.js';
+import { EMERGENCY, VIEW } from '../shared/skeld.js';
+import { ROOM_PLANS, CORRIDOR_PLANS, ROOM_PROPS } from '../shared/rooms.js';
 import { MAPS } from '../shared/mapdata.js';
 
 const STEP = 0.15;
-const allParts = [...ROOMS.flatMap((r) => r.parts), ...CORRIDORS.flatMap((c) => c.parts)];
 
-const inRect = (x, y, [x1, y1, x2, y2]) => x >= x1 && x <= x2 && y >= y1 && y <= y2;
-const walkable = (x, y) => allParts.some((p) => inRect(x, y, p));
+function inPoly(x, y, pts) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i];
+    const [xj, yj] = pts[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+const inShape = (x, y, s) => inPoly(x, y, s.points);
+const inPlan = (plan, x, y) => plan.shapes.some((s) => inShape(x, y, s));
+
+const ALL_PLANS = [...ROOM_PLANS, ...CORRIDOR_PLANS];
+const walkable = (x, y) => ALL_PLANS.some((p) => inPlan(p, x, y));
+
+// "ROOMS" para os laços abaixo: id + nome + âncoras
+const ROOMS = ROOM_PLANS.map((p) => ({ id: p.id, name: p.name, plan: p }));
 
 // flood fill a partir do spawn oficial
 const spawn = MAPS.skeld.spawn.initial;
@@ -52,11 +67,9 @@ let fails = 0;
 const fail = (msg) => { console.log('  FALHA ' + msg); fails++; };
 
 console.log('=== alcance das salas ===');
-for (const room of ROOMS) {
-  const [x1, y1, x2, y2] = room.parts[0];
-  if (!reachable((x1 + x2) / 2, (y1 + y2) / 2)) fail(`sala ${room.name} inalcançável`);
-}
-console.log(`  ${ROOMS.length} salas verificadas`);
+console.log(`  ${ROOMS.length} salas + ${CORRIDOR_PLANS.length} corredores`);
+if (ROOMS.length !== 14) fail(`esperava 14 salas, achei ${ROOMS.length}`);
+if (CORRIDOR_PLANS.length < 20) fail(`esperava >= 20 corredores, achei ${CORRIDOR_PLANS.length}`);
 
 console.log('=== consoles de tarefa oficiais ===');
 const data = MAPS.skeld;
@@ -88,14 +101,19 @@ if (Math.hypot(EMERGENCY.x - spawn.x, EMERGENCY.y - spawn.y) > EMERGENCY.radius 
 }
 console.log(`  botão em (${EMERGENCY.x}, ${EMERGENCY.y})`);
 
-console.log('=== props (não podem bloquear consoles) ===');
-for (const room of ROOMS) {
-  for (const p of room.props || []) {
-    if (p.type !== 'console') continue;
-    // o console desenhado tem que coincidir com algum console oficial da sala
-    const match = data.tasks.some((t) => t.consoles.some((c) =>
-      c.room === room.id && Math.hypot(c.x - p.x, c.y - p.y) < 0.45));
-    if (!match) fail(`console decorativo em ${room.name} (${p.x}, ${p.y}) não corresponde a nenhuma tarefa oficial`);
+console.log('=== props ===');
+for (const [roomId, props] of Object.entries(ROOM_PROPS)) {
+  for (const p of props) {
+    if (!walkable(p.x, p.y)) fail(`prop ${p.type} em ${roomId} (${p.x}, ${p.y}) fora do chão`);
+  }
+  // nenhum prop pode cobrir um console oficial da sala
+  for (const t of data.tasks) {
+    for (const c of t.consoles) {
+      if (c.room !== roomId) continue;
+      for (const p of props) {
+        if (Math.hypot(c.x - p.x, c.y - p.y) < 0.5) fail(`prop ${p.type} cobre o console ${t.taskType} em ${roomId}`);
+      }
+    }
   }
 }
 console.log('  props verificados');

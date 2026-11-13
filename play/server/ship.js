@@ -1,14 +1,55 @@
 /* Geometria jogável: colisão, salas, portas e dutos. */
 import { ROOMS, CORRIDORS, EMERGENCY } from '../shared/skeld.js';
+import { ROOM_PLANS, CORRIDOR_PLANS, ROOM_PROPS } from '../shared/rooms.js';
 import { MAPS } from '../shared/mapdata.js';
 import { GAME_CONSTANTS } from '../shared/rules.js';
 
-const ALL_PARTS = [
-  ...ROOMS.map((r) => ({ room: r.id, parts: r.parts })),
-  ...CORRIDORS.map((c) => ({ room: null, parts: c.parts })),
-];
+// Plantas: ROOM_PLANS/CORRIDOR_PLANS são a fonte de verdade do chão.
+const ROOM_FLOOR = ROOM_PLANS.map((p) => ({
+  room: p.id,
+  name: p.name,
+  plan: { ...p, bounds: planBounds(p) },
+  props: ROOM_PROPS[p.id] || [],
+}));
+const CORRIDOR_FLOOR = CORRIDOR_PLANS.map((p) => ({
+  room: null,
+  plan: { ...p, bounds: planBounds(p) },
+}));
+const ALL_PARTS = [...ROOM_FLOOR, ...CORRIDOR_FLOOR];
 
 const inRect = (x, y, r) => x >= r[0] && x <= r[2] && y >= r[1] && y <= r[3];
+
+/** Ponto dentro de polígono (ray casting). */
+function inPoly(x, y, pts) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i];
+    const [xj, yj] = pts[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** Caixa delimitadora de uma planta (para atalho de colisão). */
+function planBounds(plan) {
+  let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+  for (const shape of plan.shapes) {
+    for (const [x, y] of shape.points) {
+      if (x < x1) x1 = x;
+      if (y < y1) y1 = y;
+      if (x > x2) x2 = x;
+      if (y > y2) y2 = y;
+    }
+  }
+  return [x1, y1, x2, y2];
+}
+
+/** O ponto está dentro do chão da sala/corredor? */
+function inPlan(plan, x, y) {
+  const b = plan.bounds;
+  if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) return false;
+  return plan.shapes.some((s) => (s.type === 'poly' ? inPoly(x, y, s.points) : inRect(x, y, s)));
+}
 
 // Frestas: retângulos que deveriam se tocar mas ficaram com um vão mínimo.
 // A tolerância é pequena de propósito: um valor alto abriria "chão falso" fora
@@ -23,25 +64,41 @@ export class Ship {
     this.mapId = mapId;
     this.data = MAPS[mapId] || MAPS.skeld;
     this.rooms = ROOMS;
-    this.roomById = Object.fromEntries(ROOMS.map((r) => [r.id, r]));
+    this.roomById = Object.fromEntries(ROOM_FLOOR.map((r) => [r.room, {
+      id: r.room, name: r.name, shapes: r.plan.shapes, bounds: r.plan.bounds, props: r.props,
+    }]));
     this.doors = this.data.doors.map((d) => ({ ...d, closedUntil: 0 }));
     this.emergency = EMERGENCY;
     this.corridors = CORRIDORS;
+    this.floorRooms = ROOM_FLOOR;
+    this.floorCorridors = CORRIDOR_FLOOR;
+  }
+
+  /** Salas no formato usado pelo cliente (planta + props). */
+  serializedRooms() {
+    return ROOM_FLOOR.map((r) => ({
+      id: r.room, name: r.name, shapes: r.plan.shapes, props: r.props,
+      bounds: r.plan.bounds,
+    }));
+  }
+
+  /** Corredores no formato usado pelo cliente. */
+  serializedCorridors() {
+    return CORRIDOR_FLOOR.map((c) => ({ id: c.plan.id, shapes: c.plan.shapes }));
   }
 
   roomAt(x, y) {
-    for (const r of ROOMS) {
-      for (const p of r.parts) if (inRect(x, y, p)) return r.id;
-    }
-    // costura: se estiver no vão entre retângulos, pertence à sala mais próxima
-    for (const r of ROOMS) {
-      for (const p of r.parts) if (inRectStitched(x, y, p)) return r.id;
+    for (const r of ROOM_FLOOR) if (inPlan(r.plan, x, y)) return r.room;
+    // costura mínima entre plantas (evita "null" exatamente na junção)
+    for (const r of ROOM_FLOOR) {
+      const b = r.plan.bounds;
+      if (x >= b[0] - STITCH && x <= b[2] + STITCH && y >= b[1] - STITCH && y <= b[3] + STITCH) return r.room;
     }
     return null;
   }
 
   isWalkableStrict(x, y) {
-    return ALL_PARTS.some((g) => g.parts.some((p) => inRect(x, y, p)));
+    return ALL_PARTS.some((g) => inPlan(g.plan, x, y));
   }
 
   isWalkable(x, y) {
@@ -49,7 +106,13 @@ export class Ship {
     for (const d of this.doors) {
       if (d.closedUntil > Date.now() && Math.hypot(d.x - x, d.y - y) < 0.85) return false;
     }
-    return ALL_PARTS.some((g) => g.parts.some((p) => inRectStitched(x, y, p)));
+    if (ALL_PARTS.some((g) => inPlan(g.plan, x, y))) return true;
+    // costura entre plantas vizinhas
+    for (const g of ALL_PARTS) {
+      const b = g.plan.bounds;
+      if (x >= b[0] - STITCH && x <= b[2] + STITCH && y >= b[1] - STITCH && y <= b[3] + STITCH) return true;
+    }
+    return false;
   }
 
   /** Move com colisão: tenta o eixo X e depois o Y (permite deslizar nas paredes). */

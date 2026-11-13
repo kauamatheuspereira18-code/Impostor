@@ -40,7 +40,7 @@ em outro computador na mesma rede.
 | **Reunião** | Discussão + votação (tempos configuráveis, padrão 15s/120s), chat e votos anônimos. O mais votado é ejetado; empate não ejeta ninguém. |
 | **Emergência** | Botão na Cafeteria, 1 vez por partida (configurável). |
 | **Bots** | Preenchem a sala, fazem tarefas, matam, reportam, consertam sabotagem e votam. |
-| **Mapa** | Skeld com as 14 salas e 21 corredores (geometria derivada das posições oficiais dos consoles), névoa de visão como no jogo, mini-mapa e escuridão quando as luzes são cortadas. |
+| **Mapa** | Skeld com as 14 salas e 21 corredores, cada sala com planta própria (octógono na Cafeteria, canto cortado em Armas, bico na Navegação...), consoles e dutos nas posições oficiais. Névoa de visão, câmera acompanhando o jogador e escuridão quando as luzes são cortadas. |
 | **Fantasmas** | Jogadores mortos continuam vendo o mapa e a votação (não podem votar). |
 | **Controles** | **WASD** ou **setas** para andar; **E** para usar o console/objeto mais próximo (tarefa, botão de emergência, duto, reportar corpo); **Q** para matar (impostor); **R** para sabotar; **V** para entrar/sair do duto; **Enter** para abrir o chat da reunião. No celular: arraste o dedo para andar e use os botões na tela. |
 

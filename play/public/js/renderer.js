@@ -128,22 +128,21 @@ export class Renderer {
     const z = this.zoom;
 
     // Piso metálico contínuo (salas + corredores têm o mesmo chão)
-    for (const space of spaces) {
-      for (const part of space.parts) this.fillRectWorld(part, '#63799c');
-    }
-    for (const c of corridors) {
-      for (const part of c.parts) this.fillRectWorld(part, '#5a6f90');
-    }
+    for (const space of spaces) this.fillPlanWorld(space.shapes, '#63799c');
+    for (const c of corridors) this.fillPlanWorld(c.shapes, '#5a6f90');
     // hachura sutil do piso
-    this.drawFloorTiles([...spaces.flatMap((s) => s.parts), ...corridors.flatMap((c) => c.parts)]);
+    this.drawFloorTiles(spaces, corridors);
 
-    // cada sala tem sua parede (contorno da união das partes); corredores não têm
-    for (const space of spaces) this.strokeUnionOutline(space.parts, z);
+    // cada sala tem sua parede (contorno da planta)
+    for (const space of spaces) this.strokePlanOutline(space.shapes, z);
 
-    // props e consoles
+    // consoles oficiais do jogo (posições vindas dos dados, não desenhadas à mão)
+    for (const c of state.ship?.consoles || []) this.drawConsole(c, z, state);
+
+    // props decorativos das salas
     for (const space of spaces) {
       const label = space.name;
-      const [x1, y1, x2, y2] = space.parts[0];
+      const [x1, , x2, y2] = space.bounds || [0, 0, 0, 0];
       this.drawRoomLabel(label, (x1 + x2) / 2, y2 - 0.75, space.id);
       for (const p of space.props || []) this.drawProp(p, z, state);
     }
@@ -172,27 +171,146 @@ export class Renderer {
     }
   }
 
-  /** Hachura de placas do piso, para dar textura metálica. */
-  drawFloorTiles(parts) {
+  /** Console de tarefa oficial. O visual depende do tipo (como no jogo). */
+  drawConsole(c, z, state) {
+    const { ctx } = this;
+    const s = this.worldToScreen(c.x, c.y);
+    const mine = (state.you?.tasks || []).find((t) => (t.consoles || []).some((x) => x.id === c.id && x.room === c.room));
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    const body = '#2f3d54';
+    const edge = '#8fb4e6';
+    const glow = 'rgba(120, 220, 255, 0.9)';
+    const unit = z * 0.34;
+    switch (c.task) {
+      case 'SwipeCard': // leitor de cartão na parede
+        ctx.fillStyle = body; ctx.fillRect(-unit * 1.1, -unit * 0.75, unit * 2.2, unit * 1.5);
+        ctx.strokeStyle = edge; ctx.lineWidth = 1.5; ctx.strokeRect(-unit * 1.1, -unit * 0.75, unit * 2.2, unit * 1.5);
+        ctx.fillStyle = glow; ctx.fillRect(-unit * 0.8, -unit * 0.45, unit * 1.6, unit * 0.28);
+        break;
+      case 'FixWiring': // painel elétrico
+        ctx.fillStyle = body; ctx.fillRect(-unit, -unit, unit * 2, unit * 2);
+        ctx.strokeStyle = edge; ctx.lineWidth = 1.5; ctx.strokeRect(-unit, -unit, unit * 2, unit * 2);
+        ctx.strokeStyle = '#e8b64c'; ctx.lineWidth = 1.2; ctx.beginPath();
+        ctx.moveTo(-unit * 0.6, -unit * 0.5); ctx.lineTo(unit * 0.2, 0); ctx.lineTo(-unit * 0.2, unit * 0.2); ctx.lineTo(unit * 0.6, unit * 0.6);
+        ctx.stroke();
+        break;
+      case 'DownloadData':
+      case 'UploadData': // painel de dados
+        ctx.fillStyle = body; ctx.fillRect(-unit, -unit * 0.8, unit * 2, unit * 1.6);
+        ctx.strokeStyle = '#7fe3b0'; ctx.lineWidth = 1.5; ctx.strokeRect(-unit, -unit * 0.8, unit * 2, unit * 1.6);
+        ctx.fillStyle = glow; ctx.fillRect(-unit * 0.7, -unit * 0.45, unit * 1.4, unit * 0.9);
+        break;
+      case 'EmptyGarbage':
+      case 'FuelEngines': // chute/alavanca
+        ctx.fillStyle = '#4a5c78'; ctx.fillRect(-unit * 1.2, -unit * 0.6, unit * 2.4, unit * 1.2);
+        ctx.strokeStyle = edge; ctx.strokeRect(-unit * 1.2, -unit * 0.6, unit * 2.4, unit * 1.2);
+        ctx.fillStyle = '#e8b64c'; ctx.beginPath(); ctx.arc(0, 0, unit * 0.35, 0, Math.PI * 2); ctx.fill();
+        break;
+      case 'DivertPower': // caixa de energia
+        ctx.fillStyle = '#24344d'; ctx.fillRect(-unit, -unit, unit * 2, unit * 2);
+        ctx.strokeStyle = '#f0d25a'; ctx.lineWidth = 1.5; ctx.strokeRect(-unit, -unit, unit * 2, unit * 2);
+        ctx.fillStyle = '#f0d25a'; ctx.beginPath();
+        ctx.moveTo(-unit * 0.2, -unit * 0.6); ctx.lineTo(unit * 0.35, -unit * 0.05); ctx.lineTo(0, -unit * 0.05);
+        ctx.lineTo(unit * 0.2, unit * 0.6); ctx.lineTo(-unit * 0.35, unit * 0.05); ctx.lineTo(0, unit * 0.05);
+        ctx.closePath(); ctx.fill();
+        break;
+      case 'StartReactor': // alavanca do reator
+        ctx.fillStyle = '#243b33'; ctx.fillRect(-unit * 1.3, -unit * 0.7, unit * 2.6, unit * 1.4);
+        ctx.strokeStyle = '#6ef0b5'; ctx.lineWidth = 1.5; ctx.strokeRect(-unit * 1.3, -unit * 0.7, unit * 2.6, unit * 1.4);
+        ctx.strokeStyle = '#6ef0b5'; ctx.beginPath(); ctx.moveTo(-unit * 0.5, unit * 0.3); ctx.lineTo(unit * 0.5, -unit * 0.3); ctx.stroke();
+        break;
+      case 'ResetSeismic':
+      case 'StabilizeSteering': // volante
+        ctx.strokeStyle = edge; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, unit * 0.9, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(-unit * 0.9, 0); ctx.lineTo(unit * 0.9, 0);
+        ctx.moveTo(0, 0); ctx.lineTo(0, unit * 0.9); ctx.stroke();
+        break;
+      case 'PrimeShields':
+      case 'ClearAsteroids': // console de armas
+        ctx.fillStyle = body; ctx.fillRect(-unit * 1.1, -unit * 0.9, unit * 2.2, unit * 1.8);
+        ctx.strokeStyle = edge; ctx.lineWidth = 1.5; ctx.strokeRect(-unit * 1.1, -unit * 0.9, unit * 2.2, unit * 1.8);
+        ctx.fillStyle = '#ff8a5c'; ctx.beginPath(); ctx.arc(0, 0, unit * 0.3, 0, Math.PI * 2); ctx.fill();
+        break;
+      default: // console genérico
+        ctx.fillStyle = body; ctx.fillRect(-unit, -unit * 0.85, unit * 2, unit * 1.7);
+        ctx.strokeStyle = edge; ctx.lineWidth = 1.5; ctx.strokeRect(-unit, -unit * 0.85, unit * 2, unit * 1.7);
+        ctx.fillStyle = glow; ctx.fillRect(-unit * 0.7, -unit * 0.5, unit * 1.4, unit * 0.5);
+        break;
+    }
+    // destaque suave se for uma tarefa do jogador
+    if (mine) {
+      ctx.strokeStyle = 'rgba(255, 214, 64, 0.55)';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(-unit * 1.4, -unit * 1.3, unit * 2.8, unit * 2.6);
+    }
+    ctx.restore();
+  }
+
+  /** Hachura de placas do piso: recortada pelo contorno das salas. */
+  drawFloorTiles(spaces, corridors) {
     const { ctx } = this;
     ctx.save();
+    ctx.beginPath();
+    for (const g of [...spaces, ...corridors]) {
+      for (const shape of g.shapes || []) {
+        shape.points.forEach(([x, y], i) => {
+          const s = this.worldToScreen(x, y);
+          i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y);
+        });
+        ctx.closePath();
+      }
+    }
+    ctx.clip();
     ctx.strokeStyle = 'rgba(255,255,255,0.07)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     const STEP = 1.6;
-    for (const [x1, y1, x2, y2] of parts) {
-      for (let x = Math.ceil(x1 / STEP) * STEP; x < x2; x += STEP) {
-        if (x <= x1 + 0.05) continue;
-        const a = this.worldToScreen(x, y1);
-        const b = this.worldToScreen(x, y2);
-        ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
-      }
-      for (let y = Math.ceil(y1 / STEP) * STEP; y < y2; y += STEP) {
-        if (y <= y1 + 0.05) continue;
-        const a = this.worldToScreen(x1, y);
-        const b = this.worldToScreen(x2, y);
-        ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
-      }
+    for (let x = -28; x <= 24; x += STEP) {
+      const a = this.worldToScreen(x, -19);
+      const b = this.worldToScreen(x, 11);
+      ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+    }
+    for (let y = -19; y <= 11; y += STEP) {
+      const a = this.worldToScreen(-28, y);
+      const b = this.worldToScreen(24, y);
+      ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /** Preenche uma planta (lista de polígonos) com uma cor. */
+  fillPlanWorld(shapes, color) {
+    const { ctx } = this;
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    for (const shape of shapes || []) {
+      shape.points.forEach(([x, y], i) => {
+        const s = this.worldToScreen(x, y);
+        i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y);
+      });
+      ctx.closePath();
+    }
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /** Parede de uma sala: contorno de cada polígono da planta. */
+  strokePlanOutline(shapes, z) {
+    const { ctx } = this;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(205, 224, 250, 0.95)';
+    ctx.lineWidth = 3.5;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (const shape of shapes || []) {
+      shape.points.forEach(([x, y], i) => {
+        const s = this.worldToScreen(x, y);
+        i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y);
+      });
+      ctx.closePath();
     }
     ctx.stroke();
     ctx.restore();

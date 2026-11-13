@@ -638,20 +638,35 @@ export class Game {
 
   scheduleBotVotes() {
     if (this.voteTimer) clearTimeout(this.voteTimer);
-    const votingEndsAt = this.meeting?.votingUntil || Infinity;
-    this.voteTimer = setTimeout(() => {
-      if (this.state !== 'meeting' || !this.meeting) return;
+    if (this.voteTimer2) clearTimeout(this.voteTimer2);
+    const endsAt = this.meeting?.votingUntil || Infinity;
+
+    // dois momentos de voto, como numa partida real: parte dos bots vota no
+    // começo da votação, o resto vota no fim da discussão. Ambos terminam
+    // antes de votingUntil, então nenhum voto é descartado.
+    const wave = (minDelay, maxDelay) => {
       for (const p of [...this.players.values()]) {
         if (!p.isBot || !p.alive) continue;
-        // vota cedo o suficiente para contar: nunca depois do fim da votação
-        const latest = Math.max(500, votingEndsAt - Date.now() - 3000);
-        const delay = Math.min(rand(1200, 6000), latest);
+        const latest = Math.max(300, endsAt - Date.now() - 2500);
+        const delay = Math.max(300, Math.min(rand(minDelay, maxDelay), latest));
         setTimeout(() => {
-          if (this.state !== 'meeting' || p.voted) return;
+          if (this.state !== 'meeting' || !this.meeting || p.voted) return;
+          if (Date.now() > new Date(this.meeting.votingUntil).getTime()) return;
           this.vote(p.id, this.botVoteChoice(p));
         }, delay);
       }
-    }, Math.max(0, this.settings.discussionTime * 1000 + 800));
+    };
+    this.voteTimer = setTimeout(
+      () => wave(600, 5000),
+      Math.max(0, this.settings.discussionTime * 1000 + 300),
+    );
+    // rede de segurança: se alguém ficou sem votar, vota perto do fim
+    this.voteTimer2 = setTimeout(() => {
+      if (this.state !== 'meeting' || !this.meeting) return;
+      for (const p of [...this.players.values()]) {
+        if (p.isBot && p.alive && !p.voted) this.vote(p.id, this.botVoteChoice(p));
+      }
+    }, Math.max(1000, endsAt - Date.now() - 4000));
   }
 
   botVoteChoice(bot) {
@@ -680,10 +695,16 @@ export class Game {
     if (Date.now() > this.meeting.votingUntil) return { error: 'Votação encerrada.' };
     p.voted = true;
     p.votedFor = targetId;
-    const alive = [...this.players.values()].filter((x) => x.alive);
-    if (alive.every((x) => x.voted)) setTimeout(() => this.finishMeeting(), 2000);
+    // voto contado: com todos os vivos votando, a reunião fecha na hora.
+    // (a checagem fica aqui, não num timer, para nunca "perder" o último voto)
+    if (this.allAliveVoted()) setTimeout(() => this.finishMeeting(), 1800);
     this.push();
     return { ok: true };
+  }
+
+  allAliveVoted() {
+    const alive = [...this.players.values()].filter((x) => x.alive);
+    return alive.length > 0 && alive.every((x) => x.voted);
   }
 
   skipVote(playerId) {
@@ -946,7 +967,7 @@ export class Game {
         // reator exige 2 pessoas: espalha em cantos opostos para não empatar no mesmo ponto
         if (this.sabotage.type === 'reactor') {
           const others = [...this.players.values()].filter((x) => x.isBot && x.role === 'crew' && x.botState?.goal?.type === 'fixSabotage');
-          const [rx1, ry1, rx2, ry2] = room.parts[0];
+          const [rx1, ry1, rx2, ry2] = room.bounds || room.parts?.[0] || [-1, -1, 1, 1];
           const side = others.length % 2;
           const tx = side ? rx2 - 1.2 : rx1 + 1.2;
           const ty = side ? ry2 - 1.2 : ry1 + 1.2;
@@ -1092,10 +1113,13 @@ export class Game {
       settings: this.settings,
       ship: {
         mapId: this.settings.map,
-        spaces: this.ship.rooms.map((r) => ({
-          id: r.id, name: r.name, parts: r.parts, props: r.props || [], radius: r.radius,
-        })),
-        corridors: this.ship.corridors.map((c) => ({ id: c.id, parts: c.parts })),
+        spaces: this.ship.serializedRooms(),
+        corridors: this.ship.serializedCorridors(),
+        // consoles oficiais, direto dos dados do jogo (para o render desenhar)
+        consoles: this.ship.data.tasks.flatMap((t) => t.consoles.map((c) => ({
+          id: c.id, room: c.room, x: c.x, y: c.y, task: t.taskType, game: t.game, name: t.name,
+          length: t.length, usableDistance: c.usableDistance,
+        }))),
         vents: isImp || this.state === 'ended' ? this.ship.data.vents : [],
         doors: this.ship.serializedDoors(),
         emergency: this.ship.emergency,
@@ -1155,7 +1179,7 @@ export class Game {
 function consolePointForRoom(room, ship) {
   // o centro do bounding box pode cair fora do chão (salas em L): procura o ponto
   // navegável mais próximo do centro
-  const [x1, y1, x2, y2] = room.parts[0];
+  const [x1, y1, x2, y2] = room.bounds || room.parts?.[0] || [-1, -1, 1, 1];
   const cx = (x1 + x2) / 2;
   const cy = (y1 + y2) / 2;
   if (!ship) return { x: cx, y: cy };
