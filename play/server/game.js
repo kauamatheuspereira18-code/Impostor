@@ -1091,6 +1091,8 @@ export class Game {
     }
 
     this.meetingEndsAt = Date.now() + 5000;
+    // o jogo termina na hora se a ejeção zerou os impostores ou deixou a tripulação em minoria
+    if (m.ejectedId) this.checkWin();
     setTimeout(() => {
       if (this.state !== 'meeting') return;
       this.state = 'tasks';

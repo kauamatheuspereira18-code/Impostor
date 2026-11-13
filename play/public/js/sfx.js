@@ -232,6 +232,111 @@ class Sfx {
       this.tone({ freq: f, type: 'triangle', dur: 0.22, gain: 0.12, delay: i * 0.1 }));
   }
 
+  /* ---------- som individual de cada tarefa ----------
+     Cada minigame tem timbre próprio, como no jogo: o passo usa o mesmo som
+     mais curto/baixo e a conclusão fecha com a confirmação daquela tarefa. */
+  task(game, done = true) {
+    const v = done ? 1 : 0.6;
+    switch (game) {
+      case 'swipecard': // leitor magnético + bipe do cartão aceito
+        this.noise({ dur: 0.26, gain: 0.09 * v, filter: 2600, type: 'highpass', sweepTo: 700 });
+        if (done) {
+          this.tone({ freq: 1180, type: 'square', dur: 0.06, gain: 0.07, delay: 0.16 });
+          this.tone({ freq: 1560, type: 'square', dur: 0.10, gain: 0.07, delay: 0.24 });
+        }
+        break;
+      case 'wires': // faísca elétrica
+        this.noise({ dur: 0.12, gain: 0.13 * v, filter: 2400, type: 'bandpass', sweepTo: 900, q: 2 });
+        this.tone({ freq: 1800, to: 320, type: 'square', dur: 0.14 * (done ? 1.4 : 1), gain: 0.10 * v });
+        if (done) this.tone({ freq: 620, type: 'triangle', dur: 0.12, gain: 0.08, delay: 0.16 });
+        break;
+      case 'asteroids': // laser + explosão
+        this.tone({ freq: 900, to: 140, type: 'square', dur: 0.12, gain: 0.10 * v });
+        this.noise({ dur: 0.35, gain: 0.16 * v, filter: 700, type: 'lowpass', sweepTo: 120 });
+        if (done) this.tone({ freq: 70, to: 40, type: 'sine', dur: 0.4, gain: 0.16, delay: 0.04 });
+        break;
+      case 'scan': // scanner subindo
+        this.tone({ freq: 420, to: 1180, type: 'sine', dur: 0.5 * (done ? 1.3 : 0.7), gain: 0.09 * v });
+        if (done) this.tone({ freq: 1560, type: 'triangle', dur: 0.14, gain: 0.09, delay: 0.5 });
+        break;
+      case 'sample': // gotas no frasco
+        this.tone({ freq: 760, to: 520, type: 'triangle', dur: 0.10, gain: 0.09 * v });
+        if (done) {
+          this.tone({ freq: 600, to: 380, type: 'triangle', dur: 0.12, gain: 0.08, delay: 0.13 });
+          this.tone({ freq: 980, type: 'sine', dur: 0.16, gain: 0.07, delay: 0.3 });
+        }
+        break;
+      case 'upload': // chirp de modem
+        [0, 0.07, 0.14, 0.21].forEach((d, i) =>
+          this.tone({ freq: 700 + i * 220, type: 'square', dur: 0.05, gain: 0.06 * v, delay: d }));
+        if (done) this.tone({ freq: 1240, to: 1600, type: 'sine', dur: 0.18, gain: 0.08, delay: 0.3 });
+        break;
+      case 'divert': // energia desviando
+        this.tone({ freq: 80, to: 240, type: 'sawtooth', dur: 0.35 * (done ? 1.2 : 0.8), gain: 0.10 * v });
+        this.noise({ dur: 0.2, gain: 0.06 * v, filter: 1100, type: 'bandpass' });
+        if (done) this.tone({ freq: 520, type: 'triangle', dur: 0.12, gain: 0.07, delay: 0.34 });
+        break;
+      case 'o2filter': // sopro de ar
+        this.noise({ dur: 0.5 * (done ? 1.3 : 0.8), gain: 0.30 * v, filter: 420, type: 'bandpass', sweepTo: 1500, q: 0.8 });
+        this.tone({ freq: 240, to: 420, type: 'sine', dur: 0.3, gain: 0.05 * v });
+        if (done) this.tone({ freq: 880, type: 'sine', dur: 0.12, gain: 0.07, delay: 0.5 });
+        break;
+      case 'steering': // volante + motorzinho
+        [0, 0.09, 0.18].forEach((d) => this.tone({ freq: 240, type: 'square', dur: 0.04, gain: 0.07 * v, delay: d }));
+        this.tone({ freq: 120, to: 180, type: 'sawtooth', dur: 0.4, gain: 0.05 * v, delay: 0.1 });
+        if (done) this.tone({ freq: 700, type: 'triangle', dur: 0.12, gain: 0.07, delay: 0.46 });
+        break;
+      case 'reactor': // reator acendendo
+        this.tone({ freq: 60, to: 180, type: 'sine', dur: 0.7 * (done ? 1.2 : 0.7), gain: 0.13 * v });
+        this.tone({ freq: 120, to: 360, type: 'triangle', dur: 0.6, gain: 0.06 * v });
+        if (done) this.tone({ freq: 520, type: 'sine', dur: 0.2, gain: 0.07, delay: 0.66 });
+        break;
+      case 'manifolds': // batidas metálicas
+        this.tone({ freq: 220, to: 90, type: 'square', dur: 0.09, gain: 0.10 * v });
+        if (done) {
+          this.tone({ freq: 180, to: 70, type: 'square', dur: 0.11, gain: 0.10, delay: 0.14 });
+          this.noise({ dur: 0.18, gain: 0.07, filter: 1900, type: 'bandpass', delay: 0.13 });
+        }
+        break;
+      case 'alignengine': // motor alinhando
+        this.tone({ freq: 70, to: 110, type: 'sawtooth', dur: 0.45 * (done ? 1.2 : 0.8), gain: 0.12 * v });
+        this.noise({ dur: 0.3, gain: 0.06 * v, filter: 420, type: 'lowpass' });
+        if (done) this.tone({ freq: 420, to: 620, type: 'triangle', dur: 0.16, gain: 0.07, delay: 0.44 });
+        break;
+      case 'fuel': // combustível enchendo
+        [0, 0.14, 0.28].forEach((d, i) =>
+          this.tone({ freq: 260 - i * 40, to: 150 - i * 20, type: 'sine', dur: 0.12, gain: 0.10 * v, delay: d }));
+        if (done) this.tone({ freq: 640, type: 'triangle', dur: 0.12, gain: 0.07, delay: 0.42 });
+        break;
+      case 'garbage': // lixo sendo sugado
+        this.noise({ dur: 0.45 * (done ? 1.2 : 0.8), gain: 0.12 * v, filter: 1400, type: 'lowpass', sweepTo: 200 });
+        if (done) this.tone({ freq: 180, to: 90, type: 'sine', dur: 0.24, gain: 0.09, delay: 0.1 });
+        break;
+      case 'chart': // sonar do curso
+        this.tone({ freq: 1240, type: 'sine', dur: 0.14, gain: 0.09 * v });
+        if (done) {
+          this.tone({ freq: 1240, type: 'sine', dur: 0.10, gain: 0.05, delay: 0.18 });
+          this.tone({ freq: 1860, type: 'triangle', dur: 0.16, gain: 0.06, delay: 0.3 });
+        }
+        break;
+      case 'calibrate': // cliques do dial
+        [0, 0.08, 0.16].forEach((d) => this.tone({ freq: 1500, type: 'square', dur: 0.03, gain: 0.06 * v, delay: d }));
+        if (done) {
+          this.tone({ freq: 760, type: 'triangle', dur: 0.1, gain: 0.08, delay: 0.24 });
+          this.tone({ freq: 1140, type: 'triangle', dur: 0.14, gain: 0.08, delay: 0.34 });
+        }
+        break;
+      case 'multistep': // ativar escudos (energia carregando)
+        this.tone({ freq: 220, to: 440, type: 'sawtooth', dur: 0.35 * (done ? 1.3 : 0.8), gain: 0.09 * v });
+        this.noise({ dur: 0.25, gain: 0.05 * v, filter: 900, type: 'bandpass', sweepTo: 1800 });
+        if (done) this.tone({ freq: 880, type: 'sine', dur: 0.18, gain: 0.08, delay: 0.4 });
+        break;
+      default:
+        // passo genérico / conclusão genérica
+        done ? this.taskDone() : this.taskStep();
+    }
+  }
+
   /* ---------- alarme de sabotagem crítica ---------- */
   startAlarm() {
     if (!this.ready || this.alarmOn) return;

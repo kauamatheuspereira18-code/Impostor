@@ -7,11 +7,13 @@
   "scripts": {
     "start": "node server/server.js",
     "dev": "node --watch server/server.js",
-    "test": "node tests/smoke.test.mjs",
-    "test:edge": "node tests/edge.test.mjs",
-    "test:full": "node tests/fullgame.test.mjs",
+    "test": "node tests/audio.test.mjs && node tests/eject.test.mjs && node tests/roles.test.mjs && node tools/validate-map.mjs",
+    "test:game": "node tests/new_game.test.mjs && node tests/fidelity.test.mjs && node tests/taskwin.test.mjs && node tests/crewwin.test.mjs",
+    "test:full": "node tests/fullgame2.test.mjs",
+    "test:online": "node tests/online.test.mjs",
     "test:roles": "node tests/roles.test.mjs",
-    "test:audio": "node tests/audio.test.mjs"
+    "test:audio": "node tests/audio.test.mjs",
+    "test:eject": "node tests/eject.test.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",

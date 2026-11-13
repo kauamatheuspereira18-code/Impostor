@@ -10,6 +10,7 @@ const sfxSrc = fs.readFileSync(new URL('../public/js/sfx.js', import.meta.url), 
 const appSrc = fs.readFileSync(new URL('../public/js/app.js', import.meta.url), 'utf8');
 const html = fs.readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
 const css = fs.readFileSync(new URL('../public/style.css', import.meta.url), 'utf8');
+const tasksSrc = fs.readFileSync(new URL('../public/js/tasks.js', import.meta.url), 'utf8');
 
 const defs = new Set([...sfxSrc.matchAll(/^  ([a-zA-Z]+)\s*\(/gm)].map((m) => m[1]));
 const calls = new Set([...appSrc.matchAll(/sfx\.([a-zA-Z]+)\s*\(/g)].map((m) => m[1]));
@@ -19,7 +20,7 @@ for (const c of calls) check(`sfx.${c}()`, defs.has(c));
 
 console.log('[2] sons obrigatórios por evento do jogo');
 const obrigatorios = [
-  'click', 'hover', 'taskStep', 'taskDone', 'footstep', 'vent', 'kill', 'report', 'meeting',
+  'click', 'hover', 'task', 'footstep', 'vent', 'kill', 'report', 'meeting',
   'vote', 'eject', 'ejectResult', 'denied', 'door', 'sabotage', 'fixed', 'win', 'lose',
   'shift', 'phantom', 'shield', 'track', 'abilityReady', 'killReady',
   'chat', 'tick', 'emergency', 'ghost', 'allTasks', 'startAlarm', 'stopAlarm', 'startAmbient', 'stopAmbient',
@@ -29,7 +30,7 @@ for (const s of obrigatorios) check(`app dispara ${s}()`, calls.has(s));
 
 console.log('[3] sons declarados são realmente usados (sem som morto)');
 for (const d of defs) {
-  if (['init', 'setMuted', 'tone', 'noise', 'constructor'].includes(d)) continue;
+  if (['init', 'setMuted', 'tone', 'noise', 'constructor', 'taskStep', 'taskDone'].includes(d)) continue;
   check(`sfx.${d} usado`, calls.has(d) || appSrc.includes(`.${d}(`));
 }
 
@@ -45,6 +46,14 @@ check('cooldowns prontos avisam', perto(/sfx\.killReady\(\)/) && perto(/sfx\.abi
 check('chat, tick e emergência tocam', perto(/sfx\.chat\(\)/) && perto(/sfx\.tick\(\)/) && perto(/sfx\.emergency\(\)/));
 check('morte vira som de fantasma', perto(/sfx\.ghost\(\)/));
 check('fim das tarefas toca fanfarra', perto(/sfx\.allTasks\(\)/));
+check('conclusão de tarefa usa o som daquela tarefa', perto(/sfx\.task\(task\.game, true\)/) && perto(/sfx\.task\(task\.game, false\)/));
+
+console.log('[5b] uma tarefa, um som');
+const jogos = [...tasksSrc.matchAll(/^  ([a-z0-9]+): \{ title:/gm)].map((m) => m[1]);
+const cases = [...sfxSrc.matchAll(/case '([a-z0-9]+)': \/\//g)].map((m) => m[1]);
+check('todos os minigames cadastrados', jogos.length >= 16, String(jogos.length));
+for (const j of jogos) check(`som próprio de "${j}"`, cases.includes(j));
+check('seletor de som de tarefa no help', /id="taskSoundSel"/.test(html) && /sfx\.task\(\$\('taskSoundSel'\)/.test(appSrc));
 check('alarme crítico liga e desliga', perto(/startAlarm\(\)/) && perto(/stopAlarm\(\)/));
 check('ambiente da nave toca nas tarefas e para fora delas', perto(/startAmbient\(\)/) && perto(/stopAmbient\(\)/));
 
@@ -56,11 +65,16 @@ check('voo do tripulante animado', /@keyframes ejectFly/.test(css));
 check('estrelas e riscos de velocidade', /@keyframes starDrift/.test(css) && /@keyframes streakPass/.test(css));
 check('escotilha abre', /@keyframes airlockOpen/.test(css));
 check('overlay esmaece ao sair', /\.eject-overlay\.fade/.test(css));
-check('empate/pular voto não abre cena espacial', /const semEjeção = meeting\.tie \|\| !meeting\.ejectedId;/.test(appSrc));
+check('empate/pular voto não abre cena espacial', /if \(!m\.ejectedId\) \{/.test(appSrc) && /Empate! Ninguém foi ejetado\./.test(appSrc));
 check('clique/ESC pulam a cena', /'Escape', 'Space', 'Enter'/.test(appSrc));
 check('silêncio antes do veredito (2.1s)', /\}, 2100\)/.test(appSrc));
 check('veredito com som de acerto/erro', /sfx\.ejectResult\(true\)/.test(appSrc) && /sfx\.ejectResult\(false\)/.test(appSrc));
 check('contagem de impostores restantes', /impostorsAlive/.test(appSrc));
+check('último impostor encerra a partida na cena', /ERA O ÚLTIMO IMPOSTOR!/.test(appSrc));
+check('ejeção de tripulante avisa quando o jogo acabou', /Os impostores ficaram em maioria/.test(appSrc));
+check('som de vitória/derrota espera a cinemática', /pendingEndSound/.test(appSrc));
+check('partida acaba na hora ao ejetar (servidor)', /if \(m\.ejectedId\) this\.checkWin\(\);/.test(
+  fs.readFileSync(new URL('../server/game.js', import.meta.url), 'utf8')));
 
 console.log('[6] banco de sons do help (testar áudio)');
 const botoes = [...html.matchAll(/data-sound="([a-zA-Z]+)"/g)].map((m) => m[1]);

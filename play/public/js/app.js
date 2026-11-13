@@ -35,7 +35,7 @@ const C = {
   joinedAt: 0,
   session: null,
   lastKillAt: 0,
-  lastEjectAt: 0,
+  lastEjectAt: null,
   revealKey: 0,
   lastAlarmAt: 0,
   lastVentAt: 0,
@@ -46,7 +46,10 @@ const C = {
   lastFootstep: 0,
   taskPulse: 0,
   ejectTimer: null,
-  cues: { killReady: null, abilityReady: null, shields: new Set(), shifts: new Set(), hidden: new Set(), tracked: '', sabotage: false, sabType: null, tasksDone: false },
+  ejectResultTimer: null,
+  lastMeetingDone: 0,
+  pendingEndSound: null,
+  cues: { killReady: null, abilityReady: null, shields: new Set(), shifts: new Set(), hidden: new Set(), tracked: new Set(), sabotage: false, sabType: null, tasksDone: false },
 };
 
 const renderer = new Renderer($('gameCanvas'));
@@ -91,8 +94,10 @@ function saveSession(res) {
 window.__state = () => C.state;
 window.__openSpecial = (kind) => openSpecial(kind);
 window.__testMove = (x, y) => { C.local.x = x; C.local.y = y; socket.emit('move', { x, y }); };
-window.__eject = (m) => showEject(m);
+window.__eject = (ej, st) => showEject(ej, st || C.state);
+window.__handleEjection = (st) => handleEjection(st);
 window.__audioCues = (st) => audioCues(st);
+window.__sfx = sfx;
 
 socket.on('hello', (info) => {
   C.info = info;
@@ -307,6 +312,10 @@ $('btnLeave').addEventListener('click', () => {
   localStorage.removeItem('impostor:session');
   sfx.stopAlarm();
   sfx.stopAmbient();
+  C.lastEjectAt = null;
+  C.lastMeetingDone = 0;
+  C.lastKillAt = 0;
+  C.pendingEndSound = null;
   showScreen('home');
   refreshGames();
 });
@@ -320,6 +329,19 @@ document.addEventListener('mouseover', (e) => {
 });
 
 $('btnHelp').addEventListener('click', () => $('helpModal').removeAttribute('hidden'));
+
+// cada tarefa tem som próprio: o seletor do help toca o som daquela tarefa
+for (const [game, info] of Object.entries(TASK_GAMES)) {
+  if (game === 'multistep') continue;
+  const opt = document.createElement('option');
+  opt.value = game;
+  opt.textContent = info.title;
+  $('taskSoundSel').append(opt);
+}
+$('taskSoundPlay').addEventListener('click', () => {
+  sfx.init();
+  sfx.task($('taskSoundSel').value, true);
+});
 
 // banco de sons do help: toca cada efeito para conferir o áudio do navegador
 $('soundBoard')?.addEventListener('click', (e) => {
@@ -376,10 +398,10 @@ function audioCues(st) {
     if (!p.hidden) cues.hidden.delete(p.id);
   }
 
-  // marcações do rastreador
-  const ids = (st.you.tracked || []).map((t) => t.id).join(',');
-  if (ids && ids !== cues.tracked) sfx.track();
-  cues.tracked = ids;
+  // marcações do rastreador (só toca quando uma marca NOVA aparece)
+  const marcas = (st.you.tracked || []).map((t) => t.id);
+  if (marcas.some((id) => !cues.tracked.has(id))) sfx.track();
+  cues.tracked = new Set(marcas);
 
   // barra de tarefas completa
   if (st.taskBar && st.taskBar.total) {
@@ -402,6 +424,14 @@ socket.on('state', (state) => {
   const prev = C.state;
   C.state = state;
   if (!state.you) return;
+
+  // entrou no meio de uma partida: adota os eventos antigos sem repetir cena/som
+  if (!prev) {
+    C.lastKillAt = state.lastKill?.at || 0;
+    C.lastEjectAt = state.lastEject?.at || null;
+    C.lastMeetingDone = state.meeting?.doneAt || 0;
+    previousAlive = state.players.find((p) => p.id === state.you.id)?.alive !== false;
+  }
 
   // ---- ganchos de som e cinemática ----
   if (prev && prev.state === 'lobby' && state.state !== 'lobby') {
@@ -438,9 +468,12 @@ socket.on('state', (state) => {
   }
   if (state.state === 'ended' && prev?.state !== 'ended') {
     const won = (state.winner === 'impostor' && state.you.role === 'impostor') || (state.winner === 'crew' && state.you.role === 'crew');
-    won ? sfx.win() : sfx.lose();
     sfx.stopAlarm();
     sfx.stopAmbient();
+    // se a partida acabou numa ejeção, o som de vitória/derrota espera a cinemática sair
+    const vaiEjetar = !!state.lastEject && state.lastEject.at !== C.lastEjectAt;
+    if (vaiEjetar || !$('ejectOverlay').hidden) C.pendingEndSound = won ? 'win' : 'lose';
+    else won ? sfx.win() : sfx.lose();
   }
   const tipoSab = state.sabotage?.type || null;
   if (tipoSab && tipoSab !== C.cues.sabType && state.you.role !== 'impostor' && !['reactor', 'o2'].includes(tipoSab)) {
@@ -493,7 +526,7 @@ socket.on('state', (state) => {
     if (prev?.state === 'lobby' || !prev) toast('A partida começou!');
   }
 
-  if (state.state === 'meeting' && state.meeting?.done) showEject(state.meeting);
+  handleEjection(state);
   if (state.state !== 'meeting' && !$('ejectOverlay').hidden && !state.meeting) {
     // a cinemática some sozinha, mas garante que não fique presa
     if (Date.now() - (C.lastEjectLocal || 0) > 4200) $('ejectOverlay').hidden = true;
@@ -1563,13 +1596,13 @@ function openTask(task, consoleId) {
       if (res?.error) return toast(res.error);
       if (res.finished) {
         toast(`Tarefa concluída: ${task.name}`);
-        sfx.taskDone();
+        sfx.task(task.game, true); // som próprio da tarefa
         flashScreen('', 120);
         taskDoneBurst();
         closeTask();
       } else if (task.totalSteps > 1) {
         toast(`Passo ${res.step}/${res.totalSteps}`);
-        sfx.taskStep();
+        sfx.task(task.game, false);
       }
     });
   };
@@ -1914,25 +1947,39 @@ function flashScreen(kind = '', ms = 180) {
 /* ================================================================
    Cinemática de ejeção
    ================================================================ */
-function showEject(meeting) {
-  if (!meeting || C.lastEjectAt === meeting.doneAt) return;
-  C.lastEjectAt = meeting.doneAt;
-
-  C.lastEjectLocal = Date.now();
-  const semEjeção = meeting.tie || !meeting.ejectedId;
-  if (semEjeção) {
-    // como no jogo original: sem cena espacial quando ninguém sai da nave
-    sfx.denied();
-    toast(meeting.tie ? 'Empate! Ninguém foi ejetado.' : 'Ninguém foi ejetado.');
-    return;
+/** Trata o resultado de cada votação: cena de ejeção, empate, voto pulado. */
+function handleEjection(state) {
+  const ej = state.lastEject;
+  if (ej && ej.at !== C.lastEjectAt) {
+    C.lastEjectAt = ej.at;
+    showEject(ej, state);
   }
+  const m = state.meeting;
+  if (m?.done && m.doneAt !== C.lastMeetingDone) {
+    C.lastMeetingDone = m.doneAt;
+    if (!m.ejectedId) {
+      // como no jogo original: empate ou voto pulado não abrem a cena espacial
+      sfx.denied();
+      toast(m.tie ? 'Empate! Ninguém foi ejetado.' : 'Ninguém foi ejetado.');
+    }
+  }
+}
+
+function showEject(ej, state) {
+  if (!ej?.id) return;
+  C.lastEjectLocal = Date.now();
+
+  const restam = typeof state?.impostorsAlive === 'number' ? state.impostorsAlive : null;
+  const acabou = state?.state === 'ended';
+  const reveal = !!ej.role;
 
   renderer.shake(9, 520);
   flashScreen('red', 220);
   const overlay = $('ejectOverlay');
   const crew = $('ejectCrew');
-  const ejected = C.state?.players.find((p) => p.id === meeting.ejectedId);
-  const color = ejected ? (C.colors.find((c) => c.id === ejected.color)?.hex || '#c51111') : '#7f8ea3';
+  const color = ej.color !== undefined
+    ? (C.colors.find((c) => c.id === ej.color)?.hex || '#c51111')
+    : '#7f8ea3';
   crew.style.color = color;
   crew.style.animation = 'none';
   void crew.offsetWidth;
@@ -1943,9 +1990,12 @@ function showEject(meeting) {
 
   const text = $('ejectText');
   const sub = $('ejectSub');
-  text.textContent = `${meeting.ejectedName || '???'} foi ejetado.`;
+  const note = $('ejectNote');
+  text.textContent = `${ej.name || '???'} foi ejetado.`;
   sub.className = 'eject-sub';
   sub.textContent = '';
+  note.textContent = '';
+  note.className = 'eject-note';
   $('ejectCaption').classList.remove('show');
 
   // silêncio no vácuo: só o casco girando, depois o veredito
@@ -1953,24 +2003,43 @@ function showEject(meeting) {
   C.ejectResultTimer = setTimeout(() => {
     overlay.classList.add('result');
     $('ejectCaption').classList.add('show');
-    if (meeting.ejectedRole === 'impostor') {
-      sub.textContent = 'ERA O IMPOSTOR!';
+
+    if (ej.role === 'impostor') {
+      const ultimo = restam === 0;
+      sub.textContent = ultimo ? 'ERA O ÚLTIMO IMPOSTOR!' : 'ERA O IMPOSTOR!';
       sub.classList.add('crew');
+      if (ultimo) {
+        note.textContent = 'Todos os impostores foram eliminados — vitória da tripulação!';
+        note.classList.add('win');
+      } else if (restam !== null) {
+        note.textContent = `Restam ${restam} impostor${restam === 1 ? '' : 'es'} — a partida continua.`;
+      }
       sfx.ejectResult(true);
-    } else if (meeting.ejectedRole === 'crew') {
-      const restam = C.state?.impostorsAlive;
-      sub.textContent = typeof restam === 'number'
-        ? `Não era o impostor. Restam ${restam} impostor${restam === 1 ? '' : 'es'}.`
-        : 'Não era o impostor.';
+    } else if (ej.role === 'crew') {
+      sub.textContent = 'Não era o impostor.';
+      if (acabou) {
+        note.textContent = 'Os impostores ficaram em maioria — fim de partida.';
+        note.classList.add('lose');
+      } else if (restam !== null) {
+        note.textContent = `Restam ${restam} impostor${restam === 1 ? '' : 'es'} — a partida continua.`;
+      }
       sfx.ejectResult(false);
     } else {
       sub.textContent = 'Papel desconhecido.';
+      note.textContent = acabou ? 'Fim de partida.' : '';
       sfx.ejectResult(false);
+    }
+
+    // quando o jogo acabou na ejeção, o som de resultado entra depois do veredito
+    if (C.pendingEndSound) {
+      const som = C.pendingEndSound;
+      C.pendingEndSound = null;
+      setTimeout(() => sfx[som](), 700);
     }
   }, 2100);
 
-  // clique/seta/ESC pula a cena
-  const pular = () => {
+  // clique/ESC/Espaço pulam a cena
+  const fechar = () => {
     clearTimeout(C.ejectResultTimer);
     clearTimeout(C.ejectTimer);
     overlay.hidden = true;
@@ -1978,20 +2047,20 @@ function showEject(meeting) {
     $('ejectCaption').classList.remove('show');
     document.removeEventListener('keydown', onKey);
     overlay.removeEventListener('click', pular);
+    if (C.pendingEndSound) {
+      const som = C.pendingEndSound;
+      C.pendingEndSound = null;
+      sfx[som]();
+    }
   };
+  const pular = () => fechar();
   const onKey = (e) => { if (['Escape', 'Space', 'Enter'].includes(e.code)) pular(); };
   overlay.addEventListener('click', pular);
   document.addEventListener('keydown', onKey);
 
   setTimeout(() => overlay.classList.add('fade'), 2700);
   clearTimeout(C.ejectTimer);
-  C.ejectTimer = setTimeout(() => {
-    overlay.hidden = true;
-    overlay.classList.remove('fade', 'result');
-    $('ejectCaption').classList.remove('show');
-    document.removeEventListener('keydown', onKey);
-    overlay.removeEventListener('click', pular);
-  }, 3600);
+  C.ejectTimer = setTimeout(fechar, 3600);
 }
 
 /* ================================================================

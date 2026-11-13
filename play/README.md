@@ -50,13 +50,14 @@ A partida é autoritativa no servidor, então todos veem a mesma coisa.
 | **Portas** | O impostor fecha as portas de uma sala por 10 s, com cooldown de 30 s por sala e fechamento animado. |
 | **Corpos** | Quem encontra reporta; a reunião mostra onde o corpo estava. |
 | **Reunião** | Mesa com todos sentados ao redor (como no jogo), discussão + votação, chat, votos anônimos, empate e "pular voto". |
-| **Ejeção** | Cinemática no espaço: escotilha abrindo, tripulante girando com rastro, estrelas passando, ~2 s de silêncio e então o veredito ("ERA O IMPOSTOR" / "Não era o impostor — restam N"), clique/ESC pula. Empate ou voto pulado não abrem a cena, como no jogo. |
+| **Ejeção** | Cinemática no espaço: escotilha abrindo, tripulante girando com rastro, estrelas passando, ~2 s de silêncio e então o veredito. Cobre os cinco desfechos: impostor ejetado com outros vivos ("ERA O IMPOSTOR · restam N"), **último impostor** ("ERA O ÚLTIMO IMPOSTOR" + vitória da tripulação), tripulante ejetado com a partida seguindo ("Não era o impostor · restam N"), tripulante ejetado que deixa os impostores em maioria (fim de partida) e papel oculto quando "confirmar ejetado" está desligado. O jogo termina **na hora** da ejeção quando ela zera os impostores ou deixa a tripulação em minoria; o som de vitória/derrota espera o veredito sair. Empate ou voto pulado não abrem a cena, como no jogo. Clique/ESC pula. |
 | **Fantasmas** | Mortos atravessam paredes, continuam completando as tarefas (contam na barra) e assistem à votação. |
 | **Bots** | Fazem tarefas, matam, reportam, consertam sabotagem, votam em duas ondas e continuam tarefas como fantasmas. |
 | **Mapa (Tab)** | Mapa do navio com salas nomeadas, sua posição, suas tarefas, sabotagem piscando e (para impostor) os demais jogadores. |
 | **Admin** | Na Administração: mesa com quantos jogadores vivos há em cada sala, em tempo real. |
 | **Vitais** | Na Enfermaria: batimento de cada jogador (vivo/morto) com a cor dele. |
 | **Câmeras** | Na Segurança: quatro telas ao vivo (Cafeteria, Armas, Navegação, Armazém) com jogadores, corpos e ruído de vídeo; a luz vermelha pisca. |
+| **Som por tarefa** | Cada uma das 17 tarefas do Skeld tem efeito próprio (cartão magnético, faísca da fiação, laser/explosão dos asteroides, scanner, gotas da amostra, chirps do upload, energia desviada, sopro do filtro de O₂, volante, reator, batidas dos manifolds, motor, combustível, lixo, sonar do curso, cliques do distribuidor, escudos), com variação curta no passo e confirmação na conclusão. Dá para ouvir todos em **Ajuda → Sons**. |
 | **Som** | 33 efeitos sintetizados em WebAudio (sem arquivos): passos, kill (volume cai com a distância), report, sirene de reunião, contagem regressiva dos últimos 5 s, voto, ejeção (ar comprimido) e veredito, duto, porta, sabotagem/conserto, alarme de reator/O₂, vitória/derrota, tarefa e conclusão das tarefas, chat, emergência, morte/fantasma, habilidade de cada papel, aviso de kill/habilidade prontos, escudo e transformação de outros jogadores, além do zumbido ambiente do casco com fade. Botão de mudo persistido. |
 | **Animação** | Caminhada com pernas alternadas, mochila, viseira com reflexo, tremor de câmera no abate, respingos, duto abrindo, portas deslizando, visão em círculo. |
 | **Geometria** | 14 salas com planta própria (octógono na Cafeteria, canto cortado em Armas, bico na Navegação, Armazém em L) e 21 corredores ligados de acordo com o mapa clássico, colisão por polígono. |
@@ -87,6 +88,7 @@ node tests/crewwin.test.mjs      # vitória dos tripulantes
 node tests/taskwin.test.mjs      # vitória por tarefas (com fantasma terminando as dele)
 node tests/fidelity.test.mjs     # abate, tarefa de fantasma, portas, O₂, ejeção
 node tests/roles.test.mjs        # papéis, tempos ajustáveis, cópia do metamorfo, cosméticos e bots com habilidades
+node tests/eject.test.mjs        # todos os desfechos da votação (impostor/tripulante, restam ou acabou, empate, pulo)
 node tests/audio.test.mjs        # cobertura de som: 33 efeitos, gatilhos por evento e cena de ejeção
 node tests/fullgame2.test.mjs    # partida completa só com bots
 node tests/online.test.mjs       # criar/entrar/lista pública/reconexão/kick (servidor rodando)
