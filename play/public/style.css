@@ -804,3 +804,35 @@ html, body {
   .admin-grid { grid-template-columns: repeat(3, 1fr); }
   .cam-grid { grid-template-columns: 1fr; }
 }
+
+/* ---------- lista de tarefas no canto superior esquerdo (como no jogo) ---------- */
+.hud-top-left .objective-list {
+  justify-items: start;
+  max-width: 300px;
+  max-height: 40vh;
+}
+.hud-top-left .objective {
+  background: rgba(8, 13, 21, 0.72);
+  border-color: rgba(140, 175, 235, 0.14);
+  font-size: 12px;
+  padding: 3px 9px;
+}
+
+/* ---------- anel de cooldown do kill (como no original) ---------- */
+.action-kill { --cd: 0; }
+.action-kill::after {
+  content: '';
+  position: absolute; inset: -3px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: conic-gradient(rgba(6, 10, 16, 0.72) calc(var(--cd) * 1%), rgba(0, 0, 0, 0) 0);
+  opacity: var(--cd-on, 0);
+  transition: opacity 0.15s;
+}
+.action-kill .action-cd { background: rgba(0,0,0,0.12); font-size: 22px; font-weight: 800; }
+
+.map-tag {
+  align-self: center; font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--muted); border: 1px dashed rgba(150, 185, 235, 0.3);
+  border-radius: 999px; padding: 3px 9px;
+}

@@ -29,7 +29,7 @@ if (isCrew) {
   check('tarefas do jogador têm consoles', (st?.you?.tasks?.length || 0) > 0, `tarefas=${st?.you?.tasks?.length}`);
   const tt = st.you.tasks?.[0];
   check('tarefa com console real', !!tt?.consoles?.[0]?.x, JSON.stringify(tt?.consoles?.[0]));
-  // padrão oficial (taskBarMode=1) mostra a barra apenas em reuniões
+  // padrão oficial (taskBarMode=0) mostra a barra sempre
   const tbVisible = st?.settings?.taskBarMode === 0 ? !!st?.taskBar : st?.taskBar === null;
   check('barra de tarefas coerente com a config', tbVisible, `mode=${st?.settings?.taskBarMode} bar=${JSON.stringify(st?.taskBar)}`);
 } else {

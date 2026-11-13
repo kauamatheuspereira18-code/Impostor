@@ -276,9 +276,10 @@ socket.on('state', (state) => {
     const meP = state.players.find((p) => p.id === state.you.id);
     const d = meP ? Math.hypot(meP.x - state.lastKill.x, meP.y - state.lastKill.y) : 99;
     if (state.you.role === 'impostor' || d < 11) {
+      const killerP = state.players.find((p) => p.id === state.lastKill.killerId);
       renderer.killAt(
         { x: state.lastKill.x, y: state.lastKill.y, color: state.lastKill.victimColor },
-        null,
+        killerP ? { x: killerP.x, y: killerP.y } : null,
       );
       if (state.you.role === 'impostor' || d < 6.5) sfx.kill();
     }
@@ -395,22 +396,20 @@ function buildMapRow(state, isHost) {
   row.dataset.map = state.settings.map;
   row.dataset.host = String(isHost);
   row.innerHTML = '';
-  const maps = [
-    { id: 'skeld', label: 'The Skeld', available: true },
-    { id: 'mira', label: 'Mira HQ', available: false },
-    { id: 'polus', label: 'Polus', available: false },
-    { id: 'airship', label: 'Airship', available: false },
-    { id: 'fungle', label: 'Fungle', available: false },
-  ];
+  // só o mapa clássico: The Skeld
+  const maps = [{ id: 'skeld', label: 'The Skeld' }];
   for (const m of maps) {
     const b = document.createElement('button');
     b.className = 'map-btn' + (m.id === state.settings.map ? ' active' : '');
-    b.textContent = m.available ? m.label : m.label + ' 🔒';
-    b.disabled = !isHost || !m.available;
-    b.title = m.available ? '' : 'Dados do mapa já estão no repositório, geometria jogável em breve';
+    b.textContent = m.label;
+    b.disabled = !isHost;
     b.addEventListener('click', () => emit('setSettings', { patch: { map: m.id } }));
     row.append(b);
   }
+  const tag = document.createElement('span');
+  tag.className = 'map-tag';
+  tag.textContent = 'mapa clássico';
+  row.append(tag);
 }
 
 const SETTINGS_DEFS = [
@@ -1020,10 +1019,15 @@ function updateActionAvailability() {
 function updateCooldowns() {
   const st = C.state;
   if (!st || !st.you) return;
+  const total = st.you.killCooldownMs || 25000;
   const left = Math.max(0, (st.you.killReadyAt || 0) - Date.now());
   const cd = $('killCd');
   cd.hidden = left <= 0;
   cd.textContent = left > 0 ? Math.ceil(left / 1000) : '';
+  const btn = $('btnKill');
+  const pct = Math.max(0, Math.min(100, (left / total) * 100));
+  btn.style.setProperty('--cd', pct.toFixed(1));
+  btn.style.setProperty('--cd-on', left > 0 ? '1' : '0');
 }
 
 /* ================================================================
@@ -1344,13 +1348,29 @@ $('goLobby').addEventListener('click', () => {
 /* ================================================================
    FEED + TOAST
    ================================================================ */
+const VISUAL_TASKS = [
+  { match: /scan/i, kind: 'scan', task: 'SubmitScan' },
+  { match: /astero/i, kind: 'asteroids', task: 'ClearAsteroids' },
+  { match: /escudo/i, kind: 'shields', task: 'PrimeShields' },
+];
+
+function triggerVisualTask(text, st) {
+  if (!st?.settings?.visualTasks) return;
+  for (const v of VISUAL_TASKS) {
+    if (!v.match.test(text)) continue;
+    const console_ = (st.ship?.consoles || []).find((c) => c.task === v.task);
+    if (console_) renderer.visualTask(v.kind, console_.x, console_.y);
+    return;
+  }
+}
+
 function updateFeed(st) {
   const feed = $('feed');
   for (const entry of st.log || []) {
     const sig = `${entry.type}:${entry.text}`;
     if (entry.type === 'chat' || C.feedSeen.has(sig)) continue;
     C.feedSeen.add(sig);
-    if (entry.type === 'task') continue; // tarefas geram muito ruído
+    if (entry.type === 'task') { triggerVisualTask(entry.text, st); continue; }
     const item = el('div', 'item' + (entry.type === 'eject' ? ' kill' : '') + (entry.type === 'gameover' ? ' win' : ''));
     item.textContent = entry.text;
     feed.append(item);

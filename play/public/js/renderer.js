@@ -26,6 +26,8 @@ export class Renderer {
     this.overlayCtx = this.overlay ? this.overlay.getContext('2d') : null;
     this.smooth = new Map();
     this.markers = [];
+    this.visuals = [];
+    this.ventOpen = new Map();
     this.resize();
   }
 
@@ -64,6 +66,12 @@ export class Renderer {
   shake(amount, ms = 380) {
     this.shakeAmount = Math.max(this.shakeAmount, amount);
     this.shakeUntil = performance.now() + ms;
+  }
+
+  /** Efeito de tarefa visual (scan, asteroides, escudos) visto por todos. */
+  visualTask(kind, x, y) {
+    const dur = kind === 'scan' ? 4200 : kind === 'asteroids' ? 1800 : 2600;
+    this.visuals.push({ kind, x, y, t0: performance.now(), dur });
   }
 
   /** Registra a animação de abate entre dois pontos. */
@@ -113,6 +121,7 @@ export class Renderer {
 
     this.drawShip(state, opts);
     for (const body of state.bodies || []) this.drawBody(body, state);
+    this.drawVisualTasks();
     this.drawKills(state);
 
     const players = state.players || [];
@@ -589,6 +598,74 @@ export class Renderer {
     void state;
   }
 
+  drawVisualTasks() {
+    const now = performance.now();
+    this.visuals = this.visuals.filter((v) => now - v.t0 < v.dur);
+    const { ctx } = this;
+    for (const v of this.visuals) {
+      const t = (now - v.t0) / v.dur;
+      const s = this.worldToScreen(v.x, v.y);
+      const z = this.zoom;
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      if (v.kind === 'scan') {
+        // feixe do scanner da Enfermaria
+        const beam = ctx.createLinearGradient(0, -z * 1.6, 0, z * 0.2);
+        beam.addColorStop(0, 'rgba(120, 255, 210, 0)');
+        beam.addColorStop(0.5, `rgba(120, 255, 210, ${0.35 * (1 - t)})`);
+        beam.addColorStop(1, 'rgba(120, 255, 210, 0.05)');
+        ctx.fillStyle = beam;
+        ctx.fillRect(-z * 0.42, -z * 1.6, z * 0.84, z * 1.8);
+        for (let i = 0; i < 3; i++) {
+          const k = (t * 1.6 + i / 3) % 1;
+          ctx.strokeStyle = `rgba(150, 255, 220, ${(1 - k) * 0.6})`;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.ellipse(0, z * 0.2 - k * z * 1.5, z * (0.3 + k * 0.25), z * (0.1 + k * 0.06), 0, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      } else if (v.kind === 'asteroids') {
+        // tiros saindo do console de Armas para o espaço
+        for (let i = 0; i < 9; i++) {
+          const a = -0.9 + i * 0.24 + Math.sin(i * 4.1) * 0.05;
+          const len = z * (0.5 + t * 2.4);
+          ctx.strokeStyle = `rgba(255, 220, 120, ${(1 - t) * 0.9})`;
+          ctx.lineWidth = Math.max(1.5, z * 0.05);
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(a) * z * 0.25, Math.sin(a) * z * 0.25);
+          ctx.lineTo(Math.cos(a) * (z * 0.25 + len), Math.sin(a) * (z * 0.25 + len));
+          ctx.stroke();
+        }
+        ctx.fillStyle = `rgba(255, 200, 90, ${0.5 * (1 - t)})`;
+        ctx.beginPath();
+        ctx.arc(0, 0, z * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        // escudos: anéis hexagonais azuis
+        for (let i = 0; i < 2; i++) {
+          const k = (t * 1.4 + i * 0.5) % 1;
+          const r = z * (0.9 + k * 2.2);
+          ctx.strokeStyle = `rgba(120, 200, 255, ${(1 - k) * 0.55})`;
+          ctx.lineWidth = Math.max(2, z * 0.07);
+          ctx.beginPath();
+          for (let a = 0; a < 6; a++) {
+            const ang = (a / 6) * Math.PI * 2 + Math.PI / 6;
+            const px = Math.cos(ang) * r;
+            const py = Math.sin(ang) * r;
+            a ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+          }
+          ctx.closePath();
+          ctx.stroke();
+        }
+        ctx.fillStyle = `rgba(140, 210, 255, ${0.25 * (1 - t)})`;
+        ctx.beginPath();
+        ctx.arc(0, 0, z * 0.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
   drawKills() {
     const now = performance.now();
     this.kills = this.kills.filter((k) => now - k.t0 < 1100);
@@ -599,6 +676,24 @@ export class Renderer {
       const h = this.zoom;
       ctx.save();
       ctx.translate(s.x, s.y);
+      // golpe: risco branco entre o impostor e a vítima
+      if (k.killer && t < 0.45) {
+        const ks = this.worldToScreen(k.killer.x, k.killer.y);
+        ctx.save();
+        ctx.globalAlpha = (1 - t / 0.45) * 0.9;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 3.5;
+        ctx.beginPath();
+        ctx.moveTo(ks.x - s.x, ks.y - s.y);
+        ctx.lineTo(0, 0);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(255, 60, 80, 0.9)';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.arc(0, 0, this.zoom * (0.15 + t), 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
       // clarão + respingos
       ctx.globalAlpha = 1 - t;
       ctx.fillStyle = 'rgba(255, 240, 240, 0.85)';
@@ -622,11 +717,15 @@ export class Renderer {
     for (const v of vents) {
       const s = this.worldToScreen(v.x, v.y);
       const near = me && Math.hypot(v.x - (me.x ?? 0), v.y - (me.y ?? 0)) < 1.5;
+      const target = me?.ventId === v.id ? 1 : 0;
+      const cur = this.ventOpen.get(v.id) ?? 0;
+      const open = cur + (target - cur) * 0.18;
+      this.ventOpen.set(v.id, open);
       drawVent(this.ctx, {
         x: s.x,
         y: s.y,
         size: this.zoom * 0.5,
-        open: me?.ventId === v.id ? 1 : 0,
+        open,
         active: me?.ventId === v.id,
         highlight: near,
       });

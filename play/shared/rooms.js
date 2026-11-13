@@ -127,7 +127,8 @@ export const CORRIDOR_PLANS = [
   { id: 'hallSecurityLow', shapes: [rect(-17.2, -10.0, -11.0, -8.4)] },
   { id: 'hallCentral', shapes: [rect(-1.4, -7.4, 0.6, -2.4)] },
   { id: 'hallAdmin', shapes: [rect(4.6, -5.6, 6.0, -2.4)] },
-  { id: 'hallElec', shapes: [rect(-8.0, -6.4, -6.0, -4.6), rect(-7.2, -10.6, -5.4, -8.6)] },
+  { id: 'hallAdminStorage', shapes: [rect(1.1, -7.4, 2.7, -5.6)] },
+  { id: 'hallElec', shapes: [rect(-7.9, -6.7, -5.9, -4.4), rect(-7.0, -10.9, -4.4, -8.8), rect(-5.2, -8.8, -4.4, -6.4)] },
   { id: 'hallCafeToLife', shapes: [rect(5.4, -1.4, 7.4, -0.6)] },
   { id: 'hallWeapons', shapes: [rect(6.2, 1.0, 8.6, 2.8)] },
   { id: 'hallEast', shapes: [rect(8.4, -6.8, 13.8, -4.2)] },
@@ -135,10 +136,14 @@ export const CORRIDOR_PLANS = [
   { id: 'hallLifeSupp', shapes: [rect(7.4, -4.6, 8.4, -1.4)] },
   { id: 'hallStorageEngine', shapes: [rect(-15.4, -14.0, -4.6, -12.2)] },
   { id: 'hallStorageSouth', shapes: [rect(-2.6, -11.0, 0.4, -8.6)] },
-  { id: 'hallStorageComms', shapes: [rect(-1.2, -12.4, 3.9, -10.6)] },
-  { id: 'hallShieldsStorage', shapes: [rect(3.2, -13.6, 6.4, -11.8)] },
-  { id: 'hallShields', shapes: [rect(7.4, -15.0, 9.2, -11.8)] },
-  { id: 'hallCommsAdmin', shapes: [rect(4.6, -11.4, 6.2, -10.4)] },
+  // Armazém -> Comunicações (saída lateral direita do armazém)
+  { id: 'hallStorageComms', shapes: [rect(1.2, -16.2, 2.9, -14.2)] },
+  // Comunicações -> Escudos
+  { id: 'hallCommsShields', shapes: [rect(7.2, -16.2, 8.6, -14.2)] },
+  // Escudos -> corredor leste -> Navegação
+  { id: 'hallShieldsNav', shapes: [rect(9.0, -13.5, 10.8, -8.2), rect(9.0, -8.2, 14.2, -6.4)] },
+  // Administração -> Comunicações (descida até a porta de Comms)
+  { id: 'hallCommsAdmin', shapes: [rect(4.6, -13.7, 6.2, -10.9)] },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -182,10 +187,11 @@ export const ROOM_PROPS = {
     { type: 'panel', x: 1.3, y: -8.0, w: 1.4, h: 0.45 },
   ],
   Storage: [
+    { type: 'window', x: -5.3, y: -11.0, w: 0.35, h: 5.0 },
     { type: 'crate', x: -3.6, y: -13.6, w: 1.2, h: 1.2 },
     { type: 'crate', x: -2.0, y: -14.0, w: 1.0, h: 1.0 },
     { type: 'crate', x: 0.9, y: -13.1, w: 1.1, h: 1.1 },
-    { type: 'crate', x: 2.2, y: -11.6, w: 0.9, h: 0.9 },
+    { type: 'crate', x: 0.6, y: -10.2, w: 0.9, h: 0.9 },
     { type: 'crate', x: -3.9, y: -8.4, w: 1.0, h: 1.0 },
   ],
   Electrical: [

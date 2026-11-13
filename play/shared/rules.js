@@ -32,11 +32,11 @@ export const GAME_CONSTANTS = {
 export const DEFAULT_SETTINGS = {
   map: 'skeld',
   maxPlayers: 10,
-  numImpostors: 1,
+  numImpostors: 2,
   confirmImpostor: true,      // Confirm Ejects
   emergencyMeetings: 1,       // Num Emergency Meetings
   anonymousVotes: true,
-  taskBarMode: 1,             // 0 = sempre, 1 = reuniões, 2 = nunca
+  taskBarMode: 0,             // 0 = sempre, 1 = reuniões, 2 = nunca
   visualTasks: true,
   killCooldown: 25,           // segundos
   killDistance: 1,            // índice em KILL_DISTANCES (1 = média)

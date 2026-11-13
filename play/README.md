@@ -59,7 +59,8 @@ A partida é autoritativa no servidor, então todos veem a mesma coisa.
 | **Câmeras** | Na Segurança: quatro telas ao vivo (Cafeteria, Armas, Navegação, Armazém) com jogadores, corpos e ruído de vídeo; a luz vermelha pisca. |
 | **Som** | Efeitos sintetizados em WebAudio: passos, kill, report, sirene de reunião, voto, ejeção, duto, porta, tarefa e alarme do reator. Botão de mudo. |
 | **Animação** | Caminhada com pernas alternadas, mochila, viseira com reflexo, tremor de câmera no abate, respingos, duto abrindo, portas deslizando, visão em círculo. |
-| **Geometria** | 14 salas com planta própria (octógono na Cafeteria, canto cortado em Armas, bico na Navegação, Armazém em L) e 21 corredores, colisão por polígono. |
+| **Geometria** | 14 salas com planta própria (octógono na Cafeteria, canto cortado em Armas, bico na Navegação, Armazém em L) e 21 corredores ligados de acordo com o mapa clássico, colisão por polígono. |
+| **Tarefas visuais** | Scan na Enfermaria, tiros de asteroide em Armas e anéis em Escudos aparecem para todos, como no jogo. |
 
 ## Controles
 
@@ -142,8 +143,8 @@ play/
 
 Comparado ao cliente oficial, ainda não estão aqui:
 
-- **Outros mapas** (Mira, Polus, Airship, Fungle): os dados de tarefas/dutos já estão no
-  repositório, mas falta desenhar e validar a geometria jogável de cada um.
+- **Outros mapas**: por escolha de escopo, o jogo fica só no **The Skeld** clássico; a
+  geometria dos demais não é usada.
 - **Papéis opcionais** (Engenheiro, Cientista, Anjo, Shapeshifter, Fantasma, Rastreador).
 - **Cosméticos** (chapéus, pets, skins) e progressão.
 - **Matchmaking público com contas/regiões** — hoje as salas são por código e por lista.
