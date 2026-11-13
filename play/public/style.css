@@ -1047,3 +1047,30 @@ body.sab-critical #screen-game::after {
 /* tempos das habilidades no lobby */
 .ability-row b { color: #9ae6ff; }
 .ability-row[data-team='impostor'] b { color: #ff9aa4; }
+
+/* tempo restante da reunião (barra que enche) */
+.meeting-clock { position: relative; }
+.meeting-clock::after {
+  content: '';
+  display: block;
+  height: 3px;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-2) calc(var(--t, 0) * 1%), rgba(255, 255, 255, 0.12) 0);
+}
+.meeting-clock.voting::after {
+  background: linear-gradient(90deg, #ff8f9a calc(var(--t, 0) * 1%), rgba(255, 255, 255, 0.12) 0);
+}
+
+/* votos aparecendo na mesa */
+.vote-card { animation: voteIn 0.18s ease-out; }
+@keyframes voteIn {
+  from { opacity: 0.55; transform: scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+.vote-card .vote-votes { animation: votePop 0.3s cubic-bezier(0.2, 1.6, 0.4, 1); }
+@keyframes votePop {
+  0% { transform: scale(0.4); opacity: 0; }
+  70% { transform: scale(1.25); opacity: 1; }
+  100% { transform: scale(1); }
+}

@@ -892,8 +892,7 @@ export class Game {
     const caller = this.players.get(callerId);
     this.state = 'meeting';
     this.emergencyCooldownUntil = Date.now() + this.settings.emergencyCooldown * 1000;
-    this.bodies = this.bodies.filter((b) => b.id !== body?.id);
-    if (body) this.bodies = [];
+    this.bodies = [];
     this.sabotage = null;
     this.ship = makeShip(this.settings.map); // portas reabrem
 
@@ -1306,6 +1305,9 @@ export class Game {
           const r = this.report(body.id, p.id);
           if (r.error) bs.reportError = r.error;
         }
+      } else if (goal.type === 'emergency') {
+        const r = this.callEmergency(p.id);
+        if (r.error) bs.emergencyError = r.error;
       } else if (goal.type === 'fixSabotage') {
         if (this.sabotage) this.fixSabotage(p.id, this.sabotage.roomId);
       }
@@ -1359,6 +1361,14 @@ export class Game {
       case 'Phantom': {
         // fica invisível quando tem testemunha e não pode matar agora
         if (!killPronto && crewPerto(4.5).length) this.useAbility(p.id, 'Phantom');
+        break;
+      }
+      case 'Scientist': {
+        // abre os vitais quando a bateria dá e volta a fechar sozinho
+        if ((p.battery ?? 100) > 30 && !p.vitalsOpen && now >= (bs.nextVitals || 0)) {
+          bs.nextVitals = now + 16000 + Math.random() * 12000;
+          this.useAbility(p.id, 'Scientist');
+        }
         break;
       }
       case 'Shapeshifter': {
@@ -1470,6 +1480,17 @@ export class Game {
         if (seen && (!closest || d < closest.d)) closest = { ...b, d };
       }
       if (closest) return { x: closest.x, y: closest.y, type: 'report', bodyId: closest.id };
+    }
+
+    // reunião de emergência: corpo antigo que ninguém reportou
+    if (p.role === 'crew' && this.settings.emergencyMeetings > 0) {
+      const restam = this.settings.emergencyMeetings - this.emergencyUsed;
+      const livre = now >= this.emergencyCooldownUntil;
+      const corpoAntigo = this.bodies.find((b) => now - b.at > 20000);
+      if (restam > 0 && livre && corpoAntigo) {
+        const e = this.ship.emergency;
+        return { x: e.x, y: e.y, type: 'emergency' };
+      }
     }
 
     if (p.role === 'impostor') {

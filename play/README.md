@@ -61,11 +61,12 @@ A partida é autoritativa no servidor, então todos veem a mesma coisa.
 | **Animação** | Caminhada com pernas alternadas, mochila, viseira com reflexo, tremor de câmera no abate, respingos, duto abrindo, portas deslizando, visão em círculo. |
 | **Geometria** | 14 salas com planta própria (octógono na Cafeteria, canto cortado em Armas, bico na Navegação, Armazém em L) e 21 corredores ligados de acordo com o mapa clássico, colisão por polígono. |
 | **Tarefas visuais** | Scan na Enfermaria, tiros de asteroide em Armas e anéis em Escudos aparecem para todos, como no jogo. |
-| **Bots com papéis** | Bots usam as habilidades: Metamorfo se disfarça antes de atacar, Fantasma desaparece quando há testemunha, Engenheiro atravessa dutos, Rastreador marca alvos, Anjo da Guarda protege quem está exposto e todo impostor usa dutos para se locomover. |
+| **Bots com papéis** | Bots usam as habilidades: Metamorfo se disfarça antes de atacar, Fantasma desaparece quando há testemunha, Engenheiro atravessa dutos, Rastreador marca alvos, Cientista abre os vitais, Anjo da Guarda protege quem está exposto e todo impostor usa dutos para se locomover. Bots também convocam reunião de emergência quando há corpo antigo sem report. |
 | **Papéis** | Até 3 impostores com Metamorfo e Fantasma; tripulantes com Engenheiro, Cientista, Barulhento, Rastreador, Anjo da Guarda ou sem papel. Configurável de 0 a 3 de cada no lobby. |
 | **Cosméticos** | Catálogo oficial completo extraído de `Cosmetics.json`: **584 chapéus, 215 trajes, 185 visores, 166 placas de nome e 53 pets**. Traje, visor, chapéu, pet e placa são escolhidos na tela inicial; o Metamorfo copia tudo junto com cor e nome. |
 | **Habilidades** | Botão de habilidade com recarga em anel, escolha de alvo, transformação com faíscas, invisibilidade, veneno, escudo, marcações no mapa, vitais com bateria e alarme do Barulhento. |
 | **Revelação de papel** | Cartão animado no começo de cada partida com papel, equipe, descrição e cúmplices. |
+| **Perfil local** | Nome, cor, chapéu, traje, visor, pet, placa e mudo ficam salvos no navegador (`localStorage`) e voltam na próxima visita. |
 
 ## Controles
 

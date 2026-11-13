@@ -71,6 +71,7 @@ function savePlayer() {
   try {
     localStorage.setItem('impostor:player', JSON.stringify({
       name: C.me.name, color: C.me.color, muted: C.muted,
+      hat: C.me.hat, skin: C.me.skin, visor: C.me.visor, pet: C.me.pet, plate: C.me.plate,
     }));
   } catch { /* sem storage */ }
 }
@@ -96,6 +97,9 @@ socket.on('hello', (info) => {
   const saved = JSON.parse(localStorage.getItem('impostor:player') || '{}');
   if (saved.name) { C.me.name = saved.name; $('nameInput').value = saved.name; }
   if (typeof saved.color === 'number') C.me.color = saved.color;
+  for (const k of ['hat', 'skin', 'visor', 'pet', 'plate']) {
+    if (typeof saved[k] === 'number') C.me[k] = saved[k];
+  }
   $('dataVersion').textContent = `dados do jogo ${info.gameDataVersion}`;
   buildColorGrid();
   buildCosmeticSelects();
@@ -118,7 +122,9 @@ function buildCosmeticSelects() {
     const opt = (x, i) => `<option value="${list.indexOf(x)}">${escapeHtml(x.name)}</option>`;
     sel.innerHTML = `<optgroup label="Destaques">${top.map((x) => opt(x)).join('')}</optgroup>`
       + `<optgroup label="Todos (${rest.length})">${rest.map((x) => opt(x)).join('')}</optgroup>`;
-    sel.value = String(C.me[key] || 0);
+    const max = list.length - 1;
+    C.me[key] = Math.max(0, Math.min(max, Number(C.me[key]) || 0));
+    sel.value = String(C.me[key]);
     sel.addEventListener('change', () => {
       C.me[key] = +sel.value;
       if (C.state?.state === 'lobby') {
@@ -126,6 +132,7 @@ function buildCosmeticSelects() {
           hat: C.me.hat, skin: C.me.skin, visor: C.me.visor, pet: C.me.pet, plate: C.me.plate,
         });
       }
+      savePlayer();
       sfx.click();
     });
   }
@@ -150,6 +157,7 @@ function buildColorGrid() {
     b.addEventListener('click', () => {
       C.me.color = c.id;
       grid.querySelectorAll('.color-swatch').forEach((x) => x.classList.toggle('selected', +x.dataset.color === c.id));
+      savePlayer();
     });
     grid.append(b);
   }
@@ -227,8 +235,13 @@ setInterval(() => {
    Ações da tela inicial
    ================================================================ */
 function nameValue() {
-  return ($('nameInput').value || 'Tripulante').trim().slice(0, 12) || 'Tripulante';
+  C.me.name = ($('nameInput').value || 'Tripulante').trim().slice(0, 12) || 'Tripulante';
+  savePlayer();
+  return C.me.name;
 }
+$('nameInput').addEventListener('change', () => {
+  C.me.name = nameValue();
+});
 
 $('btnSolo').addEventListener('click', () => {
   C.me.name = nameValue();
@@ -1509,6 +1522,15 @@ function renderMeeting(st) {
   $('meetingPhase').textContent = isVoting ? 'Votação' : 'Discussão';
   $('meetingTime').textContent = left;
 
+  // anel/barra de tempo da fase (discussão ou votação)
+  const totalMs = ((isVoting ? st.settings.votingTime : st.settings.discussionTime) || 0) * 1000;
+  const leftMs = Math.max(0, (isVoting ? m.votingUntil : m.discussionUntil) - now);
+  const clock = document.querySelector('.meeting-clock');
+  if (clock) {
+    clock.style.setProperty('--t', totalMs ? ((1 - leftMs / totalMs) * 100).toFixed(1) : '0');
+    clock.classList.toggle('voting', isVoting);
+  }
+
   const me = st.players.find((p) => p.id === st.you.id);
   const grid = $('voteGrid');
   const alreadyVoted = !!st.myVote;
@@ -1775,6 +1797,8 @@ function flashScreen(kind = '', ms = 180) {
 function showEject(meeting) {
   if (!meeting || C.lastEjectAt === meeting.doneAt) return;
   C.lastEjectAt = meeting.doneAt;
+  renderer.shake(9, 520);
+  flashScreen('red', 220);
   const overlay = $('ejectOverlay');
   const crew = $('ejectCrew');
   const ejected = C.state?.players.find((p) => p.id === meeting.ejectedId);

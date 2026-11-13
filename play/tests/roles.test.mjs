@@ -327,7 +327,43 @@ console.log('[13] bots usando habilidades');
   check('anjo da guarda bot protege quem está exposto', !!protegido, protegido?.name);
 }
 
-console.log('[14] configurações de papéis');
+console.log('[14] bots: vitais do cientista e reunião de emergência');
+{
+  const g = newGame();
+  const bots = [...g.players.values()].filter((p) => p.isBot && p.role === 'crew');
+  const sci = bots[0];
+  setRole(sci, 'Scientist', 'crew');
+  sci.abilityReadyAt = 0;
+  sci.botState = {};
+  g.botAbilities(sci, Date.now());
+  check('cientista bot abre os vitais', sci.vitalsOpen === true, `vitals=${sci.vitalsOpen}`);
+  const bateria = sci.battery;
+  g.tickAbilities(1, Date.now());
+  check('bateria do cientista bot drena', sci.battery < bateria, `${bateria} -> ${sci.battery}`);
+
+  // corpo antigo longe de todos -> bot vai ao botão
+  const caller = bots[1];
+  setRole(caller, 'Crewmate', 'crew');
+  caller.botState = {};
+  const nav = g.ship.spaces?.find?.((r) => r.id === 'Navigation') || g.ship.roomById?.Navigation;
+  const nx = nav?.bounds ? (nav.bounds[0] + nav.bounds[2]) / 2 : 10;
+  const ny = nav?.bounds ? (nav.bounds[1] + nav.bounds[3]) / 2 : 0;
+  caller.x = g.ship.emergency.x;
+  caller.y = g.ship.emergency.y;
+  g.bodies.push({
+    id: 'body_teste', playerId: 'sumido', color: 1, name: 'Sumido',
+    x: nx, y: ny, room: 'Navigation', at: Date.now() - 21000,
+  });
+  g.emergencyCooldownUntil = 0;
+  g.emergencyUsed = 0;
+  const goal = g.pickBotGoal(caller, Date.now());
+  check('bot mira o botão de emergência', goal?.type === 'emergency', JSON.stringify(goal?.type));
+  const r = g.callEmergency(caller.id);
+  check('reunião de emergência convocada pelo bot', r.ok && g.state === 'meeting', JSON.stringify(r));
+  check('corpos limpos na reunião', g.bodies.length === 0);
+}
+
+console.log('[15] configurações de papéis');
 {
   const g = newGame();
   g.setSettings({ roles: { engineer: 9, phantom: 2.4, shapeshifter: '2' } });
