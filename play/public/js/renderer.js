@@ -27,7 +27,7 @@ function roundRect(ctx, x, y, w, h, r) {
 
 /* Paleta dos pisos por sala (tons de metal do Skeld). */
 const PISO = {
-  corredor: '#aab0a4',
+  corredor: '#b3b8ab',
   porSala: {
     Cafeteria: '#b6bbad', Admin: '#b4b9ab', Weapons: '#b2b7aa', Nav: '#b6c0c2',
     Shields: '#a8b6bd', Storage: '#adb2a6', Electrical: '#a89a86', MedBay: '#b7c5c8',
@@ -217,8 +217,9 @@ export class Renderer {
     for (const space of spaces) this.fillPlanWorld(space.shapes, PISO.sala(space.id));
     this.drawFloorTiles(todas);
     this.drawSceneVignette();
-    // paredes de todas as salas e corredores num traço só (muito mais rápido)
-    this.strokePlanOutline(todas, z);
+    // paredes: corredores com parede fina, salas com parede cheia
+    this.strokePlanOutline(corridors, z, true);
+    this.strokePlanOutline(spaces, z);
 
     // consoles oficiais (posições vindas dos dados do jogo)
     for (const c of state.ship?.consoles || []) this.drawConsole(c, z, state);
@@ -401,9 +402,15 @@ export class Renderer {
     const { ctx } = this;
     // espessura em unidades do mundo: parede do original tem ~0,3 unidade
     const esp = (thin ? 0.20 : 0.32) * z;
+    // aceita tanto uma lista de formas quanto uma lista de salas/corredores
+    const lista = [];
+    for (const g of shapes || []) {
+      if (g && Array.isArray(g.shapes)) lista.push(...g.shapes);
+      else if (g && Array.isArray(g.points)) lista.push(g);
+    }
     const caminho = () => {
       ctx.beginPath();
-      for (const shape of shapes || []) {
+      for (const shape of lista) {
         (shape.points || []).forEach(([x, y], i) => {
           const s = this.worldToScreen(x, y);
           i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y);
@@ -415,23 +422,23 @@ export class Renderer {
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     // sombra projetada da parede
-    ctx.strokeStyle = 'rgba(3, 6, 10, 0.5)';
+    ctx.strokeStyle = 'rgba(3, 6, 10, 0.45)';
     ctx.lineWidth = esp * 1.5;
     caminho();
     ctx.stroke();
-    // corpo escuro da parede (quase preto, como o original)
-    ctx.strokeStyle = '#111a24';
-    ctx.lineWidth = esp;
+    // borda escura da parede
+    ctx.strokeStyle = '#16202b';
+    ctx.lineWidth = esp * 1.30;
     caminho();
     ctx.stroke();
-    // faixa interna azul-petróleo
-    ctx.strokeStyle = '#2f5866';
-    ctx.lineWidth = esp * 0.34;
+    // face superior clara (o "topo" da parede, bem visível no original)
+    ctx.strokeStyle = '#c9cbb8';
+    ctx.lineWidth = esp * 0.66;
     caminho();
     ctx.stroke();
-    // corrimão claro bem fino
-    ctx.strokeStyle = 'rgba(196, 206, 198, 0.32)';
-    ctx.lineWidth = esp * 0.10;
+    // fio azul-petróleo no meio da parede (divisória)
+    ctx.strokeStyle = 'rgba(40, 78, 92, 0.34)';
+    ctx.lineWidth = esp * 0.12;
     caminho();
     ctx.stroke();
     ctx.restore();
@@ -507,8 +514,11 @@ export class Renderer {
           ctx.closePath();
         }
       }
-      ctx.fillStyle = tom ? 'rgba(255, 255, 255, 0.075)' : 'rgba(26, 32, 30, 0.05)';
+      ctx.fillStyle = tom ? 'rgba(255, 255, 255, 0.050)' : 'rgba(28, 34, 28, 0.038)';
       ctx.fill();
+      ctx.strokeStyle = 'rgba(32, 40, 36, 0.16)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
     }
     ctx.restore();
   }
@@ -1242,12 +1252,26 @@ export class Renderer {
     ctx.beginPath();
     ctx.arc(0, 0, R * 0.90, 0, Math.PI * 2);
     ctx.fill();
-    // aro claro interno
+    // aro claro interno, com quatro aberturas (segmentos da mesa do original)
     ctx.strokeStyle = 'rgba(186, 230, 248, 0.55)';
     ctx.lineWidth = Math.max(1.5, R * 0.035);
-    ctx.beginPath();
-    ctx.arc(0, 0, R * 0.82, 0, Math.PI * 2);
-    ctx.stroke();
+    for (let i = 0; i < 4; i++) {
+      const a0 = i * (Math.PI / 2) + 0.16;
+      const a1 = a0 + Math.PI / 2 - 0.32;
+      ctx.beginPath();
+      ctx.arc(0, 0, R * 0.82, a0, a1);
+      ctx.stroke();
+    }
+    // recortes escuros do aro
+    ctx.strokeStyle = 'rgba(30, 44, 52, 0.55)';
+    ctx.lineWidth = Math.max(2, R * 0.06);
+    for (let i = 0; i < 4; i++) {
+      const a = i * (Math.PI / 2) + Math.PI / 4;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * R * 0.94, Math.sin(a) * R * 0.94);
+      ctx.lineTo(Math.cos(a) * R * 0.68, Math.sin(a) * R * 0.68);
+      ctx.stroke();
+    }
     // brilho no tampo
     ctx.fillStyle = 'rgba(255,255,255,0.09)';
     ctx.beginPath();
