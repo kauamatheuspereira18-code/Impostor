@@ -25,6 +25,18 @@ export function mix(hexA, hexB, t) {
   return `rgb(${f(a.r, b.r)}, ${f(a.g, b.g)}, ${f(a.b, b.b)})`;
 }
 
+/** Corpo do tripulante: domo em cima, laterais retas, cantos arredondados embaixo. */
+function beanPath(ctx, x, y, w, h, rTop = w * 0.5, rBottom = w * 0.32) {
+  ctx.beginPath();
+  ctx.moveTo(x, y + rTop);
+  ctx.arc(x + rTop, y + rTop, rTop, Math.PI, 0);
+  ctx.lineTo(x + w, y + h - rBottom);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - rBottom, y + h);
+  ctx.lineTo(x + rBottom, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - rBottom);
+  ctx.closePath();
+}
+
 function roundRect(ctx, x, y, w, h, r) {
   const rr = Math.min(r, Math.abs(w) / 2, Math.abs(h) / 2);
   ctx.beginPath();
@@ -56,68 +68,85 @@ export function drawCrew(ctx, o) {
     dead = false, highlight = false,
     hat = 0, hatPal = null, skin = 0, skinPal = null, visor = 0, visorPal = null,
   } = o;
-  const w = h * 0.74;
+  const w = h * 0.72;
   ctx.save();
   ctx.translate(x, y);
   if (alpha !== 1) ctx.globalAlpha *= alpha;
   if (facing < 0) ctx.scale(-1, 1);
 
-  // sombra no chão
-  if (!ghost && !dead) {
-    ctx.fillStyle = 'rgba(0,0,0,0.34)';
-    ctx.beginPath();
-    ctx.ellipse(0, h * 0.46, w * 0.56, h * 0.10, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
   const step = Math.sin(walk * Math.PI * 2);
-  const bob = Math.abs(step) * h * 0.035;
-  const top = -h * 0.56 - bob;
-  const bodyH = h * 0.86;
+  const bob = Math.abs(step) * h * 0.028;
+  const bodyH = h * 0.84;
+  const top = -h * 0.52 - bob;
 
-  // pernas (atrás do corpo)
-  const legY = h * 0.22;
-  const legW = w * 0.26;
-  const legH = h * 0.26;
-  const legs = [
-    { dx: -w * 0.24, dy: step * h * 0.06, dark: 0.22 },
-    { dx: w * 0.18, dy: -step * h * 0.06, dark: 0.1 },
-  ];
-  for (const l of legs) {
-    ctx.fillStyle = shade(color, -40 - l.dark * 120);
-    roundRect(ctx, l.dx - legW / 2, legY + l.dy, legW, legH, legW * 0.55);
+  // sombra no chão (suave, de luz vinda de cima)
+  if (!ghost && !dead) {
+    const sh = ctx.createRadialGradient(0, h * 0.4, 0, 0, h * 0.4, w * 0.62);
+    sh.addColorStop(0, 'rgba(0,0,0,0.42)');
+    sh.addColorStop(0.6, 'rgba(0,0,0,0.24)');
+    sh.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = sh;
+    ctx.beginPath();
+    ctx.ellipse(0, h * 0.40, w * 0.60, h * 0.13, 0, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  // mochila (atrás, do lado oposto ao rosto)
-  ctx.fillStyle = shade(color, -55);
-  roundRect(ctx, -w * 0.78, top + h * 0.20, w * 0.34, h * 0.40, w * 0.16);
-  ctx.fill();
-  ctx.fillStyle = shade(color, -20);
-  roundRect(ctx, -w * 0.76, top + h * 0.23, w * 0.28, h * 0.10, w * 0.08);
-  ctx.fill();
-
-  // corpo: gradiente vertical (claro em cima, escuro embaixo)
-  const grad = ctx.createLinearGradient(-w / 2, top, w / 2, top + bodyH);
-  grad.addColorStop(0, shade(color, 26));
-  grad.addColorStop(0.45, color);
-  grad.addColorStop(1, shade(color, -48));
-  ctx.fillStyle = grad;
-  roundRect(ctx, -w / 2, top, w, bodyH, w * 0.46);
-  ctx.fill();
-
-  if (outline) {
-    ctx.strokeStyle = shade(color, -110);
-    ctx.lineWidth = Math.max(1.2, h * 0.035);
-    ctx.stroke();
+  // pés (atrás do corpo): dois blocos arredondados que alternam ao andar
+  const peW = w * 0.30;
+  const peH = h * 0.20;
+  const pes = [
+    { dx: -w * 0.23, dy: step * h * 0.05, tom: -46 },
+    { dx: w * 0.23, dy: -step * h * 0.05, tom: -26 },
+  ];
+  for (const pe of pes) {
+    ctx.fillStyle = shade(color, pe.tom);
+    roundRect(ctx, pe.dx - peW / 2, h * 0.24 + pe.dy, peW, peH, peW * 0.45);
+    ctx.fill();
   }
 
-  // brilho lateral
-  ctx.save();
-  ctx.globalAlpha *= 0.22;
-  ctx.fillStyle = '#ffffff';
-  roundRect(ctx, -w * 0.36, top + h * 0.08, w * 0.16, bodyH * 0.55, w * 0.08);
+  // mochila de oxigênio (lado esquerdo, aparecendo atrás do corpo)
+  ctx.fillStyle = shade(color, -62);
+  roundRect(ctx, -w * 0.74, top + bodyH * 0.30, w * 0.36, bodyH * 0.40, w * 0.14);
   ctx.fill();
+  ctx.fillStyle = shade(color, -34);
+  roundRect(ctx, -w * 0.72, top + bodyH * 0.32, w * 0.30, bodyH * 0.09, w * 0.05);
+  ctx.fill();
+
+  // corpo: gradiente diagonal (luz em cima à esquerda, sombra embaixo à direita)
+  const grad = ctx.createLinearGradient(-w * 0.5, top, w * 0.55, top + bodyH);
+  grad.addColorStop(0, shade(color, 34));
+  grad.addColorStop(0.42, color);
+  grad.addColorStop(1, shade(color, -46));
+  ctx.fillStyle = grad;
+  beanPath(ctx, -w / 2, top, w, bodyH);
+  ctx.fill();
+
+  // borda interna mais escura (dá a leitura de volume do original)
+  ctx.save();
+  ctx.strokeStyle = shade(color, -80);
+  ctx.globalAlpha *= 0.5;
+  ctx.lineWidth = Math.max(1, h * 0.016);
+  beanPath(ctx, -w / 2 + ctx.lineWidth / 2, top + ctx.lineWidth / 2, w - ctx.lineWidth, bodyH - ctx.lineWidth);
+  ctx.stroke();
+  ctx.restore();
+
+  // brilho suave na lateral esquerda
+  ctx.save();
+  ctx.globalAlpha *= 0.20;
+  ctx.fillStyle = '#ffffff';
+  roundRect(ctx, -w * 0.42, top + h * 0.10, w * 0.11, bodyH * 0.52, w * 0.06);
+  ctx.fill();
+  ctx.restore();
+
+  // oclusão na base do corpo
+  ctx.save();
+  beanPath(ctx, -w / 2, top, w, bodyH);
+  ctx.clip();
+  const ao = ctx.createLinearGradient(0, top + bodyH * 0.55, 0, top + bodyH);
+  ao.addColorStop(0, 'rgba(0,0,0,0)');
+  ao.addColorStop(1, 'rgba(0,0,0,0.26)');
+  ctx.fillStyle = ao;
+  ctx.fillRect(-w / 2, top + bodyH * 0.5, w, bodyH * 0.5);
   ctx.restore();
 
   // traje (skin) por cima do corpo
@@ -510,10 +539,10 @@ function drawSkinArt(ctx, art, o) {
 /** Visores: padrão + variantes (zangado, papel, óculos, tapa-olho...). */
 function drawVisorArt(ctx, art, o) {
   const { w, h, top, pal } = o;
-  const vw = w * 0.68;
-  const vh = h * 0.30;
-  const vx = w * 0.02;
-  const vy = top + h * 0.16;
+  const vw = w * 0.64;
+  const vh = h * 0.34;
+  const vx = w * 0.03;
+  const vy = top + h * 0.11;
   const tint = pal?.[1];
   ctx.save();
   if (art === 2) { // máscara de papel
@@ -635,21 +664,40 @@ function drawVisorArt(ctx, art, o) {
 }
 
 function drawVisorBase(ctx, vx, vy, vw, vh, h, tint) {
-  const visorGrad = ctx.createLinearGradient(vx, vy, vx + vw, vy + vh);
-  visorGrad.addColorStop(0, tint ? shade(tint, 40) : '#dff6ff');
-  visorGrad.addColorStop(0.45, tint || '#9fdcea');
-  visorGrad.addColorStop(1, shade(tint || '#5fb6cc', -30));
+  const r = vh * 0.5;
+  // vidro: claro em cima à esquerda, azul profundo embaixo
+  const visorGrad = ctx.createLinearGradient(vx, vy, vx + vw * 0.65, vy + vh);
+  visorGrad.addColorStop(0, tint ? shade(tint, 46) : '#cdeefb');
+  visorGrad.addColorStop(0.30, tint || '#8fd2e9');
+  visorGrad.addColorStop(0.72, shade(tint || '#59aacb', -6));
+  visorGrad.addColorStop(1, shade(tint || '#3f8dae', -14));
   ctx.fillStyle = visorGrad;
-  roundRect(ctx, vx, vy, vw, vh, vh * 0.52);
+  roundRect(ctx, vx, vy, vw, vh, r);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(10,30,45,0.55)';
-  ctx.lineWidth = Math.max(1, h * 0.026);
+
+  // reflexo do ambiente na parte de baixo do vidro
+  ctx.save();
+  roundRect(ctx, vx, vy, vw, vh, r);
+  ctx.clip();
+  const baixo = ctx.createLinearGradient(0, vy + vh * 0.55, 0, vy + vh);
+  baixo.addColorStop(0, 'rgba(255,255,255,0)');
+  baixo.addColorStop(1, 'rgba(210, 245, 255, 0.34)');
+  ctx.fillStyle = baixo;
+  ctx.fillRect(vx, vy + vh * 0.5, vw, vh * 0.5);
+  ctx.restore();
+
+  // aro escuro fino
+  ctx.strokeStyle = 'rgba(9, 28, 42, 0.55)';
+  ctx.lineWidth = Math.max(1, h * 0.020);
+  roundRect(ctx, vx, vy, vw, vh, r);
   ctx.stroke();
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  roundRect(ctx, vx + vw * 0.16, vy + vh * 0.18, vw * 0.30, vh * 0.26, vh * 0.13);
+
+  // brilho especular (o "olho" brilhante do original)
+  ctx.fillStyle = 'rgba(255,255,255,0.88)';
+  roundRect(ctx, vx + vw * 0.15, vy + vh * 0.22, vw * 0.22, vh * 0.17, vh * 0.085);
   ctx.fill();
   ctx.fillStyle = 'rgba(255,255,255,0.45)';
-  roundRect(ctx, vx + vw * 0.55, vy + vh * 0.55, vw * 0.22, vh * 0.16, vh * 0.08);
+  roundRect(ctx, vx + vw * 0.55, vy + vh * 0.48, vw * 0.16, vh * 0.11, vh * 0.055);
   ctx.fill();
 }
 

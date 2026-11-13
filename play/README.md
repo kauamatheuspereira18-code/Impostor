@@ -177,6 +177,23 @@ play/
     └── validate-map.mjs
 ```
 
+## Arte do mapa (fidelidade visual)
+
+O tabuleiro é desenhado em vetor, no mesmo enquadramento do original (≈14,6 x 8,2 unidades
+na tela, tripulante com ~1 unidade de altura) e com os materiais do Skeld:
+
+- **Casco fechado**: silhueta convexa em volta de salas e corredores, com chapas e borda
+  iluminada — o vão entre as salas é casco, não espaço vazio.
+- **Piso**: placas em losango (grade de 1,12 unidade) alinhadas ao mundo e coloridas por sala
+  (Cafeteria/Admin/Storage bege, MedBay azul-claro, Elétrica marrom, motores amadeirados).
+- **Paredes**: quatro camadas (sombra, corpo escuro, faixa azul-petróleo e corrimão claro),
+  com janelas, painéis e corrimãos dos props oficiais.
+- **Cafeteria**: cinco mesas redondas azuis (quatro laterais + a do botão de emergência).
+- **Tripulante**: corpo em gradiente com mochila, pés animados, viseira de vidro com brilho
+  especular e sombra suave; nomes pequenos com contorno, como no jogo.
+- **Luz**: máscara radial em cache (cache invalidado quando o raio muda), o que deixa o quadro
+  em ~6 ms no rasterizador de teste (bem abaixo dos 16 ms de 60 fps).
+
 ## O que ainda falta para 100%
 
 Comparado ao cliente oficial, ainda não estão aqui:
@@ -194,3 +211,5 @@ Comparado ao cliente oficial, ainda não estão aqui:
 - **Matchmaking público com contas/regiões** — hoje as salas são por código e por lista.
 - **Geometria exata do mesh original** do Unity: as plantas foram reconstruídas a partir do
   mapa e das coordenadas oficiais, não extraídas do asset 3D (não há mesh em texto no repo).
+- **Sprites/texturas originais**: a arte é vetorial e procedural, feita para bater com a
+  paleta e as proporções do Skeld; não são os PNGs do jogo (não existem no repositório).
