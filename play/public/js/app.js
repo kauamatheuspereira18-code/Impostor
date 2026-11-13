@@ -46,7 +46,7 @@ const C = {
   lastFootstep: 0,
   taskPulse: 0,
   ejectTimer: null,
-  cues: { killReady: null, abilityReady: null, shields: new Set(), shifts: new Set(), hidden: new Set(), tracked: '', sabotage: false, tasksDone: false },
+  cues: { killReady: null, abilityReady: null, shields: new Set(), shifts: new Set(), hidden: new Set(), tracked: '', sabotage: false, sabType: null, tasksDone: false },
 };
 
 const renderer = new Renderer($('gameCanvas'));
@@ -442,6 +442,12 @@ socket.on('state', (state) => {
     sfx.stopAlarm();
     sfx.stopAmbient();
   }
+  const tipoSab = state.sabotage?.type || null;
+  if (tipoSab && tipoSab !== C.cues.sabType && state.you.role !== 'impostor' && !['reactor', 'o2'].includes(tipoSab)) {
+    // tripulação percebe a queda de energia / comunicação
+    sfx.sabotage();
+  }
+  C.cues.sabType = tipoSab;
   if (state.sabotage) {
     C.cues.sabotage = true;
     if (state.sabotage.type === 'reactor' || state.sabotage.type === 'o2') sfx.startAlarm();
