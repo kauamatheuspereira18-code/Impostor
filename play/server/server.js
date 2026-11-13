@@ -345,7 +345,10 @@ io.on('connection', (socket) => {
     if (!p) return reply(cb, { error: 'Sem jogador.' });
     const clean = String(text).slice(0, 120).trim();
     if (!clean) return reply(cb, { error: 'Mensagem vazia.' });
-    game.log.push({ type: 'chat', text: clean, from: p.name, fromId: p.id, color: p.color, at: Date.now() });
+    game.log.push({
+      type: 'chat', text: clean, from: p.name, fromId: p.id, color: p.color,
+      at: Date.now(), ghost: !p.alive, // mortos só falam entre mortos
+    });
     broadcast(game);
     reply(cb, { ok: true });
   });

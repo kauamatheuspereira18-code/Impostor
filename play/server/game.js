@@ -1711,7 +1711,9 @@ export class Game {
       emergencyUsed: this.emergencyUsed,
       emergencyLeft: this.settings.emergencyMeetings - this.emergencyUsed,
       sabotageReadyAt: this.sabotageReadyAt,
-      log: this.log.slice(-40),
+      log: this.log
+        .filter((e) => !(e.type === 'chat' && e.ghost && me?.alive))
+        .slice(-40),
       startedAt: this.startedAt,
       aliveCount: this.players.size ? [...this.players.values()].filter((p) => p.alive).length : 0,
       totalCount: this.players.size,

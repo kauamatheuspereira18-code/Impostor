@@ -363,7 +363,22 @@ console.log('[14] bots: vitais do cientista e reunião de emergência');
   check('corpos limpos na reunião', g.bodies.length === 0);
 }
 
-console.log('[15] configurações de papéis');
+console.log('[15] chat de mortos');
+{
+  const g = newGame();
+  const vivo = [...g.players.values()].find((p) => p.role === 'crew');
+  const morto = [...g.players.values()].find((p) => p.id !== vivo.id && p.role === 'crew');
+  morto.alive = false;
+  g.log.push({ type: 'chat', text: 'sou fantasma', from: morto.name, fromId: morto.id, ghost: true, at: Date.now() });
+  g.log.push({ type: 'chat', text: 'oi', from: vivo.name, fromId: vivo.id, ghost: false, at: Date.now() });
+  const doVivo = g.serialize(vivo.id).log.filter((e) => e.type === 'chat').map((e) => e.text);
+  const doMorto = g.serialize(morto.id).log.filter((e) => e.type === 'chat').map((e) => e.text);
+  check('vivo não vê o chat dos mortos', !doVivo.includes('sou fantasma'), JSON.stringify(doVivo));
+  check('vivo vê o chat dos vivos', doVivo.includes('oi'));
+  check('morto vê o próprio chat e o dos vivos', doMorto.includes('sou fantasma') && doMorto.includes('oi'), JSON.stringify(doMorto));
+}
+
+console.log('[16] configurações de papéis');
 {
   const g = newGame();
   g.setSettings({ roles: { engineer: 9, phantom: 2.4, shapeshifter: '2' } });

@@ -1074,3 +1074,11 @@ body.sab-critical #screen-game::after {
   70% { transform: scale(1.25); opacity: 1; }
   100% { transform: scale(1); }
 }
+
+/* chat dos mortos (só quem morreu vê) */
+.chat-line.chat-ghost { opacity: 0.75; }
+.chat-tag {
+  font-size: 9px; letter-spacing: 0.8px; text-transform: uppercase;
+  color: #a9c2ff; background: rgba(120, 160, 255, 0.16);
+  border-radius: 999px; padding: 1px 6px; margin-right: 6px;
+}

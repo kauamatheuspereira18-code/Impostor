@@ -1606,9 +1606,10 @@ function renderChat(st) {
   log.dataset.sig = sig;
   log.innerHTML = '';
   for (const line of lines) {
-    const div = el('div', 'chat-line');
+    const div = el('div', 'chat-line' + (line.ghost ? ' chat-ghost' : ''));
     const color = C.colors.find((c) => c.id === line.color)?.hex || '#fff';
-    div.innerHTML = `<span class="chat-who" style="color:${color}">${escapeHtml(line.from)}:</span><span class="chat-text">${escapeHtml(line.text)}</span>`;
+    const ghost = line.ghost ? '<span class="chat-tag">fantasma</span>' : '';
+    div.innerHTML = `${ghost}<span class="chat-who" style="color:${color}">${escapeHtml(line.from)}:</span><span class="chat-text">${escapeHtml(line.text)}</span>`;
     log.append(div);
   }
   log.scrollTop = log.scrollHeight;

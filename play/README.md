@@ -66,6 +66,7 @@ A partida é autoritativa no servidor, então todos veem a mesma coisa.
 | **Cosméticos** | Catálogo oficial completo extraído de `Cosmetics.json`: **584 chapéus, 215 trajes, 185 visores, 166 placas de nome e 53 pets**. Traje, visor, chapéu, pet e placa são escolhidos na tela inicial; o Metamorfo copia tudo junto com cor e nome. |
 | **Habilidades** | Botão de habilidade com recarga em anel, escolha de alvo, transformação com faíscas, invisibilidade, veneno, escudo, marcações no mapa, vitais com bateria e alarme do Barulhento. |
 | **Revelação de papel** | Cartão animado no começo de cada partida com papel, equipe, descrição e cúmplices. |
+| **Chat de mortos** | Quem morreu conversa só com quem morreu; os vivos não veem essas mensagens (e as mensagens aparecem marcadas como "fantasma" para os mortos). |
 | **Perfil local** | Nome, cor, chapéu, traje, visor, pet, placa e mudo ficam salvos no navegador (`localStorage`) e voltam na próxima visita. |
 
 ## Controles
