@@ -174,13 +174,31 @@ export class Ship {
   closeDoors(roomId, durationMs) {
     const until = Date.now() + durationMs;
     const affected = this.doors.filter((d) => d.room === roomId);
-    for (const d of affected) d.closedUntil = until;
+    for (const d of affected) {
+      d.closedUntil = until;
+      d.closedAt = Date.now();
+    }
     return affected.length;
+  }
+
+  /** Orientação da porta: 'h' quando o corredor atravessa na horizontal. */
+  doorOrientation(d) {
+    const open = (x, y) => this.isWalkable(x, y);
+    const horizontal = open(d.x - 0.85, d.y) && open(d.x + 0.85, d.y);
+    return horizontal ? 'v' : 'h';
   }
 
   serializedDoors() {
     const now = Date.now();
-    return this.doors.map((d) => ({ id: d.id, room: d.room, x: d.x, y: d.y, open: d.closedUntil <= now }));
+    return this.doors.map((d) => ({
+      id: d.id,
+      room: d.room,
+      x: d.x,
+      y: d.y,
+      open: d.closedUntil <= now,
+      closesIn: Math.max(0, d.closedUntil - now),
+      orientation: this.doorOrientation(d),
+    }));
   }
 
   randomSpawn(spawnCenter) {

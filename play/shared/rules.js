@@ -79,9 +79,9 @@ export const RULE_PRESETS = {
 
 /* Sabotagens por mapa (usa os sistemas oficiais de cada mapa). */
 export const MAP_SABOTAGES = {
-  skeld: ['lights', 'reactor', 'comms'],
-  mira: ['lights', 'reactor', 'comms'],
-  polus: ['lights', 'reactor', 'comms'],
+  skeld: ['lights', 'reactor', 'comms', 'o2'],
+  mira: ['lights', 'reactor', 'comms', 'o2'],
+  polus: ['lights', 'reactor', 'comms', 'o2'],
   airship: ['lights', 'reactor', 'comms'],
   fungle: ['reactor', 'comms'],
 };
@@ -99,6 +99,13 @@ export const SABOTAGE_INFO = {
     room: 'Reactor',
     time: 30,
     desc: 'O reator vai explodir. Dois tripulantes precisam segurar as alavancas.',
+    fatal: true,
+  },
+  o2: {
+    name: 'Oxigênio',
+    room: 'LifeSupp',
+    time: 30,
+    desc: 'O oxigênio acabou. Dois tripulantes precisam consertar os filtros.',
     fatal: true,
   },
   comms: {

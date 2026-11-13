@@ -9,6 +9,7 @@
 </head>
 <body>
 <div id="app">
+  <div id="netPill" class="net-pill">conectando…</div>
 
   <!-- ================= TELA INICIAL ================= -->
   <section id="screen-home" class="screen active">
@@ -47,6 +48,16 @@
         <p id="homeError" class="home-error"></p>
       </div>
 
+      <div class="home-browser">
+        <div class="browser-head">
+          <span>SALAS ABERTAS <b id="gameCount">0</b></span>
+          <button id="btnRefreshGames" class="chip">atualizar</button>
+        </div>
+        <div id="gameList" class="game-list">
+          <p class="game-empty">Nenhuma sala aberta. Crie uma ou jogue com bots.</p>
+        </div>
+      </div>
+
       <div class="home-links">
         <button id="btnHelp" class="link">Como jogar</button>
         <span class="dot-sep">·</span>
@@ -78,6 +89,13 @@
         </div>
         <ul id="lobbyPlayers" class="lobby-players"></ul>
         <div class="lobby-hint">Compartilhe o código para jogar com amigos no celular ou PC.</div>
+        <div class="lobby-chat">
+          <div id="lobbyChatLog" class="lobby-chat-log"></div>
+          <div class="chat-row">
+            <input id="lobbyChatInput" maxlength="120" placeholder="Mensagem..." autocomplete="off" />
+            <button id="lobbyChatSend" class="btn small">Enviar</button>
+          </div>
+        </div>
       </div>
 
       <div class="lobby-settings-card">
@@ -113,9 +131,18 @@
         </div>
       </div>
 
+      <div class="hud-utils">
+        <button id="btnMap" class="hud-chip" title="Mapa (Tab)">MAPA</button>
+        <button id="btnMute" class="hud-chip" title="Som">SOM</button>
+      </div>
+
       <!-- topo direito: tarefas / indicações -->
       <div class="hud-top-right">
         <div id="objectiveList" class="objective-list"></div>
+        <div id="ghostBanner" class="ghost-banner" hidden>
+          <b>FANTASMA</b>
+          <span>Você pode terminar suas tarefas e atravessar paredes.</span>
+        </div>
         <div id="sabotageBanner" class="sabotage-banner" hidden>
           <div class="sab-title" id="sabTitle">SABOTAGEM</div>
           <div class="sab-timer" id="sabTimer">30</div>
@@ -124,6 +151,8 @@
         <div id="impostorPanel" class="impostor-panel" hidden>
           <div class="imp-row"><span>Aliados</span><b id="impMates">—</b></div>
           <div class="imp-row"><span>Abates</span><b id="impKills">0</b></div>
+          <div class="imp-row"><span>Portas</span><b id="doorsHint">—</b></div>
+          <div id="doorGrid" class="door-grid"></div>
         </div>
       </div>
 
@@ -161,6 +190,7 @@
         </div>
       </div>
 
+      <div id="screenFlash" class="screen-flash"></div>
       <div id="toast" class="toast"></div>
       <div id="feed" class="feed"></div>
       <div id="ventUi" class="vent-ui" hidden>
@@ -170,6 +200,15 @@
           <button id="ventNext" class="btn small">duto ▶</button>
           <button id="ventExit" class="btn small btn-primary">Sair</button>
         </div>
+      </div>
+    </div>
+
+    <!-- mapa (Tab) -->
+    <div id="mapOverlay" class="map-overlay" hidden>
+      <div class="map-card">
+        <div class="map-head"><h3>THE SKELD</h3><button id="mapClose" class="icon-btn">✕</button></div>
+        <canvas id="mapCanvas"></canvas>
+        <div class="map-legend"><span class="lg-you">você</span><span class="lg-task">tarefa</span><span class="lg-sab">sabotagem</span></div>
       </div>
     </div>
 
@@ -222,6 +261,24 @@
             </div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- cinemática de ejeção -->
+    <div id="ejectOverlay" class="eject-overlay" hidden>
+      <div class="eject-stars"></div>
+      <div class="eject-stage">
+        <svg id="ejectCrew" class="eject-crew" viewBox="0 0 80 100" aria-hidden="true">
+          <rect x="16" y="6" width="48" height="74" rx="22" fill="currentColor" />
+          <rect x="10" y="28" width="10" height="34" rx="5" fill="rgba(0,0,0,0.3)" />
+          <rect x="40" y="22" width="26" height="16" rx="8" fill="#a8e0ef" />
+          <ellipse cx="28" cy="84" rx="10" ry="7" fill="currentColor" />
+          <ellipse cx="52" cy="84" rx="10" ry="7" fill="currentColor" />
+        </svg>
+      </div>
+      <div class="eject-caption">
+        <div id="ejectText" class="eject-text"></div>
+        <div id="ejectSub" class="eject-sub"></div>
       </div>
     </div>
 

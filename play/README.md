@@ -1,14 +1,11 @@
-# Impostor Play — a versão jogável no navegador
+# Impostor Play — Among Us jogável no navegador
 
-Este diretório coloca o **Impostor** (o servidor privado de Among Us escrito em C#) para
-rodar de um jeito que dá para **jogar de verdade no navegador, sem instalar nada**.
+Recriação jogável do **The Skeld** direto no navegador, usando os **dados oficiais do jogo**
+que vivem neste repositório (`src/Impostor.Api/Innersloth/Data`): posição de cada console,
+tarefa, duto, porta, botão de emergência, spawn e o elenco de 18 cores.
 
-> **Por que não é o `Impostor.Server` original compilado?**
-> O servidor oficial fala o protocolo UDP do jogo Among Us 16.x, então ele só funciona com
-> o cliente oficial do jogo (e exige .NET 8 + NuGet para compilar). Aqui recriamos as
-> **regras do jogo do Impostor** — tripulantes, impostor, tarefas, sabotagem, dutos,
-> reuniões e votação — em um servidor Node.js com WebSocket, jogável em qualquer navegador.
-> O código C# original continua intacto em `../src`.
+Tudo roda em Node.js + Socket.IO, sem instalar cliente, sem .NET e sem asset externo:
+o navio, os personagens, os sons e os minigames são gerados em tempo real.
 
 ## Rodar
 
@@ -20,46 +17,73 @@ npm start
 
 Abra <http://localhost:3000>. Na tela inicial:
 
-- **Jogar sozinho com bots** — entra em uma sala de 10 jogadores e a partida começa na hora.
-- **Criar sala** — gera um código de 5 letras para você compartilhar.
-- **Entrar** — digite o código da sala de um amigo.
+- **Jogar agora** — partida imediata com 9 bots (não aparece na lista pública).
+- **Criar sala** — gera um código de 4 letras (ex.: `K7QP`).
+- **Entrar** — digite o código, ou clique em uma sala da lista **Salas abertas**.
+- A lista é atualizada sozinha e mostra host, humanos, bots, mapa e estado.
 
-Para jogar com alguém: crie a sala em uma aba e entre com o código em outra aba, celular ou
-em outro computador na mesma rede.
+Para jogar com amigos: crie a sala, mande o código e cada um entra pelo celular ou PC.
+A partida é autoritativa no servidor, então todos veem a mesma coisa.
+
+## Multiplayer de verdade
+
+| Recurso | Como funciona |
+| --- | --- |
+| Salas | Código de 4 caracteres, lobby com até 15 jogadores, bots para completar. |
+| Lista pública | `/api/games` + evento `listGames`; a home mostra as salas abertas em tempo real. |
+| Host | Configura regras, adiciona bots, inicia a partida e remove jogadores. |
+| Reconexão | Queda de rede ou F5: o servidor reserva a vaga por 45 s e o cliente retoma a sessão (token salvo no navegador). |
+| Troca de host | Se o host sai, o próximo humano assume. |
+| Cores | 18 cores oficiais, sem repetição na mesma sala. |
+| Chat | Chat no lobby e na reunião. |
+| Servidor autoritativo | Movimento, tarefas, kills, sabotagens, portas e votos são validados no servidor. |
 
 ## O que tem no jogo
 
 | Recurso | Como funciona |
 | --- | --- |
-| **Papéis** | Tripulante ou Impostor. Cada um só vê o próprio papel; impostores se reconhecem. |
-| **Tarefas** | As tarefas oficiais do Skeld (dados do repositório Impostor) espalhadas pelas 13 salas. 17 minigames: fios, cartão, asteroides, escanear, inspecionar amostra, enviar dados, desviar energia, filtro de O₂, direção, reator, manifolds, alinhar motor, abastecer, lixo, rota, calibrar distribuidor e multitarefa. |
-| **Barra de tarefas** | Quando todos os tripulantes concluem suas tarefas, eles vencem. |
-| **Impostor** | Matar (com cooldown), dutos e sabotagem. Vence quando os impostores empatam em número com os tripulantes. |
-| **Sabotagem** | Luzes (escurece o mapa), comunicação e reator (se zerar, impostores vencem). Tripulantes consertam na sala certa. |
-| **Corpos** | Quem encontra reporta e abre reunião; o corpo some ao começar a votação. |
-| **Reunião** | Discussão + votação (tempos configuráveis, padrão 15s/120s), chat e votos anônimos. O mais votado é ejetado; empate não ejeta ninguém. |
-| **Emergência** | Botão na Cafeteria, 1 vez por partida (configurável). |
-| **Bots** | Preenchem a sala, fazem tarefas, matam, reportam, consertam sabotagem e votam. |
-| **Mapa** | Skeld com as 14 salas e 21 corredores, cada sala com planta própria (octógono na Cafeteria, canto cortado em Armas, bico na Navegação...), consoles e dutos nas posições oficiais. Névoa de visão, câmera acompanhando o jogador e escuridão quando as luzes são cortadas. |
-| **Fantasmas** | Jogadores mortos continuam vendo o mapa e a votação (não podem votar). |
-| **Controles** | **WASD** ou **setas** para andar; **E** para usar o console/objeto mais próximo (tarefa, botão de emergência, duto, reportar corpo); **Q** para matar (impostor); **R** para sabotar; **V** para entrar/sair do duto; **Enter** para abrir o chat da reunião. No celular: arraste o dedo para andar e use os botões na tela. |
+| **Papéis** | Tripulante ou Impostor, com visões diferentes e impostores se reconhecendo. |
+| **Tarefas** | As 18 tarefas oficiais do Skeld (26 consoles), 17 minigames: cartão, fios, asteroides, scan, amostra, upload/download, desviar energia, filtro de O₂, direção, reator, manifolds, alinhar motor, abastecer, lixo, rota, distribuidor e escudos. |
+| **Barra de tarefas** | Modos "sempre", "só em reuniões" e "nunca", como no jogo. |
+| **Impostor** | Kill com cooldown e alcance configurável, dutos e painel com os aliados. |
+| **Sabotagem** | Luzes, comunicação, reator e **oxigênio** (duas pessoas consertam). Reator/O₂ zeram e dão a vitória ao impostor. Alarme sonoro e visão reduzida. |
+| **Portas** | O impostor fecha as portas de uma sala por 10 s, com cooldown de 30 s por sala e fechamento animado. |
+| **Corpos** | Quem encontra reporta; a reunião mostra onde o corpo estava. |
+| **Reunião** | Mesa com todos sentados ao redor (como no jogo), discussão + votação, chat, votos anônimos, empate e "pular voto". |
+| **Ejeção** | Cinemática no espaço com o tripulante girando e o texto "ERA O IMPOSTOR" / "Não era o impostor". |
+| **Fantasmas** | Mortos atravessam paredes, continuam completando as tarefas (contam na barra) e assistem à votação. |
+| **Bots** | Fazem tarefas, matam, reportam, consertam sabotagem, votam em duas ondas e continuam tarefas como fantasmas. |
+| **Mapa (Tab)** | Mapa do navio com salas nomeadas, sua posição, suas tarefas, sabotagem piscando e (para impostor) os demais jogadores. |
+| **Som** | Efeitos sintetizados em WebAudio: passos, kill, report, sirene de reunião, voto, ejeção, duto, porta, tarefa e alarme do reator. Botão de mudo. |
+| **Animação** | Caminhada com pernas alternadas, mochila, viseira com reflexo, tremor de câmera no abate, respingos, duto abrindo, portas deslizando, visão em círculo. |
+| **Geometria** | 14 salas com planta própria (octógono na Cafeteria, canto cortado em Armas, bico na Navegação, Armazém em L) e 21 corredores, colisão por polígono. |
+
+## Controles
+
+- **WASD/setas** ou arraste o dedo na tela para andar.
+- **E / espaço**: usar console, botão de emergência, reportar corpo.
+- **Q**: matar (impostor) · **R**: sabotar · **F**: portas · **Tab**: mapa · **M**: som.
+- **Enter**: enviar mensagem no chat.
 
 ## Verificações
 
 ```bash
 cd play
-node tools/validate-map.mjs     # geometria: 14 salas, 26 consoles, 14 dutos, 13 portas
-node tests/new_game.test.mjs    # API do socket, tarefas, sabotagem e reunião
-node tests/crewwin.test.mjs     # regra de vitória dos tripulantes
-node tests/taskwin.test.mjs     # tripulantes vencem completando todas as tarefas
-node tests/fullgame2.test.mjs   # partida completa só com bots (até 240s)
+node tools/validate-map.mjs      # 14 salas, 26 consoles, 14 dutos, 13 portas, props e conectividade
+node tests/new_game.test.mjs     # socket: lobby, tarefas, sabotagem, reunião e voto
+node tests/crewwin.test.mjs      # vitória dos tripulantes
+node tests/taskwin.test.mjs      # vitória por tarefas (com fantasma terminando as dele)
+node tests/fidelity.test.mjs     # abate, tarefa de fantasma, portas, O₂, ejeção
+node tests/fullgame2.test.mjs    # partida completa só com bots
+node tests/online.test.mjs       # criar/entrar/lista pública/reconexão/kick (servidor rodando)
 ```
 
-Todos precisam terminar com `fails = 0`, `MAPA OK` ou um vencedor.
+Resultado atual: `MAPA OK`, `fails = 0` em todos, partida completa terminando em ~1 a 3 minutos
+com vencedor definido.
 
 ## Configuração
 
-`config.json` usa o mesmo formato de seções do Impostor original:
+`config.json` usa o formato do Impostor original:
 
 ```json
 {
@@ -70,8 +94,9 @@ Todos precisam terminar com `fails = 0`, `MAPA OK` ou um vencedor.
 }
 ```
 
-Também aceita as variáveis `PORT` e `HOST`. As regras da partida (número de jogadores,
-impostores, tarefas e botão de emergência) são ajustadas no lobby pelo host.
+Também aceita `PORT` e `HOST`. As regras (jogadores, impostores, kill, velocidade, visão,
+tarefas, tempo de discussão/votação, reuniões de emergência, barra de tarefas, fantasmas)
+são ajustadas no lobby pelo host, com presets Clássico/Casual/Especialista/Caos.
 
 ## Docker
 
@@ -81,32 +106,44 @@ docker build -t impostor-play .
 docker run -p 3000:3000 impostor-play
 ```
 
-## Testes
-
-Com o servidor rodando (`npm start`):
-
-```bash
-npm test           # fluxo completo com 2 humanos + bots (lobby, início, tarefas, kill, report, votos, sabotagem)
-npm run test:edge  # validações: permissões, cooldowns, abandono de sala, limites
-npm run test:full  # uma partida inteira só com bots até alguém vencer
-```
-
 ## Estrutura
 
 ```
 play/
-├── config.json        # porta e IP (formato do Impostor)
+├── config.json          # porta e IP (formato do Impostor)
 ├── server/
-│   ├── server.js      # HTTP + Socket.IO (eventos da partida)
-│   └── game.js        # regras: papéis, tarefas, kills, sabotagem, reuniões, IA dos bots
+│   ├── server.js        # HTTP + Socket.IO, salas, sessões, lista pública
+│   ├── game.js          # regras: papéis, tarefas, kills, sabotagem, portas, reuniões, bots
+│   └── ship.js          # colisão por polígono, salas, dutos, portas, pathfinding
 ├── shared/
-│   └── config.js      # mapa, salas, cores, tarefas e sabotagens (usado pelo servidor e pelo cliente)
+│   ├── rooms.js         # plantas das 14 salas + 21 corredores + props
+│   ├── mapdata.js       # dados oficiais extraídos do repositório Impostor
+│   ├── rules.js         # constantes, presets e sabotagens
+│   └── skeld.js         # botão de emergência e enquadramento
 ├── public/
-│   ├── index.html     # menu, lobby, HUD, modais
+│   ├── index.html       # home, lobby, HUD, mapa, reunião, ejeção, chat
 │   ├── style.css
 │   └── js/
-│       ├── main.js      # estado do cliente, HUD, reunião/votação, entrada
-│       ├── render.js    # canvas: mapa, personagens, corpos, minimapa
-│       └── minigames.js # fios, cartão, asteroides, scanner, etapas, progresso
-└── tests/             # testes de integração via socket
+│       ├── app.js       # estado do cliente, HUD, reunião, mapa, sessão
+│       ├── renderer.js  # mapa, câmera, luz, personagens, animações, minimapa
+│       ├── art.js       # arte procedural (tripulante, cadáver, duto, porta, nave)
+│       ├── sfx.js       # efeitos sonoros sintetizados
+│       └── tasks.js     # 17 minigames das tarefas oficiais
+├── tests/               # integração via socket e regras do motor
+└── tools/
+    ├── extract-mapdata.mjs
+    └── validate-map.mjs
 ```
+
+## O que ainda falta para 100%
+
+Comparado ao cliente oficial, ainda não estão aqui:
+
+- **Outros mapas** (Mira, Polus, Airship, Fungle): os dados de tarefas/dutos já estão no
+  repositório, mas falta desenhar e validar a geometria jogável de cada um.
+- **Papéis opcionais** (Engenheiro, Cientista, Anjo, Shapeshifter, Fantasma, Rastreador).
+- **Câmeras de segurança, vitals e admin table**.
+- **Cosméticos** (chapéus, pets, skins) e progressão.
+- **Matchmaking público com contas/regiões** — hoje as salas são por código e por lista.
+- **Geometria exata do mesh original** do Unity: as plantas foram reconstruídas a partir do
+  mapa e das coordenadas oficiais, não extraídas do asset 3D (não há mesh em texto no repo).

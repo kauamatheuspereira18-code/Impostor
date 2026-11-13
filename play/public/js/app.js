@@ -1,6 +1,7 @@
 import { GAME_CONSTANTS, RULE_PRESETS, SABOTAGE_INFO, MAP_SABOTAGES } from '/shared/rules.js';
 import { Renderer } from './renderer.js';
 import { TASK_GAMES } from './tasks.js';
+import { sfx } from './sfx.js';
 
 const $ = (id) => document.getElementById(id);
 const socket = io({ transports: ['websocket', 'polling'] });
@@ -22,10 +23,51 @@ const C = {
   chatLines: [],
   meetingKey: null,
   joinedAt: 0,
+  session: null,
+  lastKillAt: 0,
+  lastEjectAt: 0,
+  mapOpen: false,
+  muted: false,
+  prevPhase: null,
+  lastFootstep: 0,
+  taskPulse: 0,
+  ejectTimer: null,
 };
 
 const renderer = new Renderer($('gameCanvas'));
 window.addEventListener('resize', () => renderer.resize());
+
+/* ---------------- áudio (precisa de um gesto do usuário) ---------------- */
+function unlockAudio() {
+  sfx.init();
+  if (C.state?.state === 'tasks') {
+    sfx.startAmbient();
+    sfx.setMuted(C.muted);
+  }
+}
+window.addEventListener('pointerdown', unlockAudio, { once: true });
+window.addEventListener('keydown', unlockAudio, { once: true });
+try {
+  const saved = JSON.parse(localStorage.getItem('impostor:player') || '{}');
+  if (saved && typeof saved.muted === 'boolean') C.muted = saved.muted;
+} catch { /* sem storage */ }
+sfx.setMuted(C.muted);
+
+function savePlayer() {
+  try {
+    localStorage.setItem('impostor:player', JSON.stringify({
+      name: C.me.name, color: C.me.color, muted: C.muted,
+    }));
+  } catch { /* sem storage */ }
+}
+
+function saveSession(res) {
+  if (!res?.session) return;
+  C.session = res.session;
+  try {
+    localStorage.setItem('impostor:session', JSON.stringify({ code: res.code, session: res.session, at: Date.now() }));
+  } catch { /* sem storage */ }
+}
 
 /* ================================================================
    Boot: recebe dados do servidor (cores, presets, versão)
@@ -36,6 +78,9 @@ window.__testMove = (x, y) => { C.local.x = x; C.local.y = y; socket.emit('move'
 socket.on('hello', (info) => {
   C.info = info;
   C.colors = info.colors;
+  const saved = JSON.parse(localStorage.getItem('impostor:player') || '{}');
+  if (saved.name) { C.me.name = saved.name; $('nameInput').value = saved.name; }
+  if (typeof saved.color === 'number') C.me.color = saved.color;
   $('dataVersion').textContent = `dados do jogo ${info.gameDataVersion}`;
   buildColorGrid();
   buildPresets();
@@ -76,6 +121,57 @@ function buildPresets() {
     row.append(b);
   }
 }
+
+/* ================================================================
+   Navegador de salas (multiplayer online)
+   ================================================================ */
+const MAP_LABEL = { skeld: 'The Skeld', mira: 'Mira HQ', polus: 'Polus', airship: 'Airship', fungle: 'Fungle' };
+const STATE_LABEL = { lobby: 'aguardando', starting: 'iniciando', tasks: 'em jogo', meeting: 'reunião', ended: 'encerrando' };
+
+function renderGameList(games) {
+  const box = $('gameList');
+  $('gameCount').textContent = games.length;
+  if (!games.length) {
+    box.innerHTML = '<p class="game-empty">Nenhuma sala aberta. Crie uma ou jogue com bots.</p>';
+    return;
+  }
+  box.innerHTML = '';
+  for (const g of games) {
+    const row = el('div', 'game-row' + (g.joinable ? '' : ' full'));
+    row.innerHTML = `
+      <span class="gr-code">${escapeHtml(g.code)}</span>
+      <span>
+        <span class="gr-host">${escapeHtml(g.host)}</span>
+        <span class="gr-meta"> · ${g.humans} humano${g.humans === 1 ? '' : 's'}${g.bots ? ` + ${g.bots} bots` : ''} · ${MAP_LABEL[g.map] || g.map}</span>
+      </span>
+      <span class="gr-meta">${g.players}/${g.max} · ${STATE_LABEL[g.state] || g.state}</span>
+      <button class="btn small" ${g.joinable ? '' : 'disabled'}>${g.joinable ? 'Entrar' : 'Em jogo'}</button>`;
+    const btn = row.querySelector('button');
+    btn?.addEventListener('click', () => {
+      C.me.name = nameValue();
+      sfx.init();
+      socket.emit('join', { code: g.code, name: C.me.name, color: C.me.color }, (res) => {
+        if (res?.error) return showHomeError(res.error);
+        onJoined(res);
+      });
+    });
+    box.append(row);
+  }
+}
+
+function refreshGames() {
+  socket.emit('listGames', {}, (res) => {
+    if (res?.ok) renderGameList(res.games || []);
+  });
+}
+
+$('btnRefreshGames').addEventListener('click', () => {
+  refreshGames();
+  sfx.click();
+});
+setInterval(() => {
+  if ($('screen-home').classList.contains('active')) refreshGames();
+}, 6000);
 
 /* ================================================================
    Ações da tela inicial
@@ -123,6 +219,9 @@ function onJoined(res) {
   if (typeof res.color === 'number') C.me.color = res.color;
   C.joinedAt = Date.now();
   $('lobbyCode').textContent = res.code;
+  saveSession(res);
+  savePlayer();
+  sfx.click();
 }
 
 $('btnCopy').addEventListener('click', async () => {
@@ -138,7 +237,12 @@ $('btnLeave').addEventListener('click', () => {
   socket.emit('leave');
   C.state = null;
   C.code = null;
+  C.session = null;
+  localStorage.removeItem('impostor:session');
+  sfx.stopAlarm();
+  sfx.stopAmbient();
   showScreen('home');
+  refreshGames();
 });
 
 $('btnHelp').addEventListener('click', () => $('helpModal').removeAttribute('hidden'));
@@ -157,6 +261,44 @@ socket.on('state', (state) => {
   const prev = C.state;
   C.state = state;
   if (!state.you) return;
+
+  // ---- ganchos de som e cinemática ----
+  if (prev && prev.state === 'lobby' && state.state !== 'lobby') {
+    sfx.init();
+    sfx.startAmbient();
+  }
+  if (state.state === 'tasks' && prev?.state !== 'tasks') {
+    sfx.startAlarm && sfx.stopAlarm();
+  }
+  if (state.lastKill && state.lastKill.at !== C.lastKillAt) {
+    C.lastKillAt = state.lastKill.at;
+    const meP = state.players.find((p) => p.id === state.you.id);
+    const d = meP ? Math.hypot(meP.x - state.lastKill.x, meP.y - state.lastKill.y) : 99;
+    if (state.you.role === 'impostor' || d < 11) {
+      renderer.killAt(
+        { x: state.lastKill.x, y: state.lastKill.y, color: state.lastKill.victimColor },
+        null,
+      );
+      if (state.you.role === 'impostor' || d < 6.5) sfx.kill();
+    }
+  }
+  if (state.state === 'meeting' && prev?.state !== 'meeting') {
+    sfx.meeting();
+    flashScreen('red', 220);
+    document.querySelector('.meeting-card')?.classList.add('alarm');
+  }
+  if (state.state === 'ended' && prev?.state !== 'ended') {
+    const won = (state.winner === 'impostor' && state.you.role === 'impostor') || (state.winner === 'crew' && state.you.role === 'crew');
+    won ? sfx.win() : sfx.lose();
+    sfx.stopAlarm();
+    sfx.stopAmbient();
+  }
+  if (state.sabotage) {
+    if (state.sabotage.type === 'reactor' || state.sabotage.type === 'o2') sfx.startAlarm();
+    else sfx.stopAlarm();
+  } else {
+    sfx.stopAlarm();
+  }
 
   if (state.state === 'lobby') {
     if (!prev || prev.state !== 'lobby') {
@@ -178,6 +320,11 @@ socket.on('state', (state) => {
     if (prev?.state === 'lobby' || !prev) toast('A partida começou!');
   }
 
+  if (state.state === 'meeting' && state.meeting?.done) showEject(state.meeting);
+  if (state.state !== 'meeting' && !$('ejectOverlay').hidden && !state.meeting) {
+    // a cinemática some sozinha, mas garante que não fique presa
+    if (Date.now() - C.lastEjectAt > 4200) $('ejectOverlay').hidden = true;
+  }
   renderHud(state);
   renderMeeting(state);
   renderGameOver(state);
@@ -208,7 +355,15 @@ function renderLobby(state) {
     if (p.isHost) badges.innerHTML += '<span class="badge badge-host">HOST</span>';
     if (p.isBot) badges.innerHTML += '<span class="badge badge-bot">BOT</span>';
     if (p.id === state.you.id) badges.innerHTML += '<span class="badge badge-you">VOCÊ</span>';
+    if (p.connected === false) badges.innerHTML += '<span class="badge badge-empty">OFF</span>';
     li.append(bean, who, badges);
+    if (isHost && p.id !== state.you.id && !p.isBot) {
+      const kick = el('button', 'kick-btn', 'REMOVER');
+      kick.addEventListener('click', () => {
+        socket.emit('kick', { targetId: p.id }, (res) => { if (res?.error) toast(res.error); });
+      });
+      li.append(kick);
+    }
     ul.append(li);
   }
   // slots vazios até o máximo
@@ -221,6 +376,7 @@ function renderLobby(state) {
 
   buildMapRow(state, isHost);
   buildSettings(state, isHost);
+  renderLobbyChat(state);
 
   $('btnStart').disabled = !isHost;
   $('btnStart').textContent = isHost ? 'Iniciar partida' : 'Aguardando o host...';
@@ -344,11 +500,21 @@ function emit(ev, payload, cb) {
    ================================================================ */
 window.addEventListener('keydown', (e) => {
   if (['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    if ($('screen-game').classList.contains('active')) toggleMap();
+    return;
+  }
+  if (e.key === 'Escape') {
+    toggleMap(false);
+    return;
+  }
   C.keys.add(e.key.toLowerCase());
   if (e.key === 'e' || e.key === ' ') { e.preventDefault(); $('btnUse').click(); }
   if (e.key === 'q') $('btnKill').click();
   if (e.key === 'r') $('btnReport').click();
   if (e.key === 'f') $('btnSabotage').click();
+  if (e.key === 'm') $('btnMute').click();
 });
 window.addEventListener('keyup', (e) => C.keys.delete(e.key.toLowerCase()));
 
@@ -376,7 +542,8 @@ setInterval(() => {
   const st = C.state;
   if (!st || st.state !== 'tasks') return;
   const me = st.players.find((p) => p.id === st.you.id);
-  if (!me || !me.alive) return;
+  if (!me) return;
+  if (!me.alive && st.state !== 'tasks') return;
 
   let vx = 0;
   let vy = 0;
@@ -398,6 +565,10 @@ setInterval(() => {
   if (now - C.lastSent > 50) {
     C.lastSent = now;
     socket.emit('move', { x: C.local.x, y: C.local.y });
+  }
+  if (me.alive && now - C.lastFootstep > 340) {
+    C.lastFootstep = now;
+    sfx.footstep();
   }
 }, 50);
 
@@ -485,6 +656,9 @@ function renderHud(st) {
   const me = st.players.find((p) => p.id === st.you.id);
   if (!me) return;
 
+  // fantasma
+  $('ghostBanner').hidden = !(st.state === 'tasks' && !st.you.alive);
+
   // papel
   const roleCard = $('roleCard');
   const roleName = $('roleName');
@@ -532,6 +706,7 @@ function renderHud(st) {
     }
   } else if (st.you.role === 'impostor') {
     $('impostorPanel').hidden = false;
+    buildDoorGrid(st);
     $('impMates').textContent = st.you.impostorTeammates?.length
       ? st.you.impostorTeammates.map((m) => m.name).join(', ')
       : 'sozinho';
@@ -555,6 +730,33 @@ function renderHud(st) {
       : `Conserte em ${roomName}${st.sabotage.required > 1 ? ` (${st.sabotage.fixed}/${st.sabotage.required})` : ''}`;
   } else {
     banner.hidden = true;
+  }
+}
+
+function buildDoorGrid(st) {
+  const grid = $('doorGrid');
+  if (!st.you || st.you.role !== 'impostor' || !st.you.alive) { grid.innerHTML = ''; return; }
+  const rooms = [...new Set((st.ship?.doors || []).map((d) => d.room))];
+  const ready = st.doorsReadyAt || {};
+  const openCount = rooms.filter((r) => (ready[r] || 0) <= Date.now()).length;
+  $('doorsHint').textContent = openCount ? `${openCount} prontas` : 'recarregando';
+  const sig = rooms.map((r) => `${r}:${Math.max(0, Math.ceil(((ready[r] || 0) - Date.now()) / 1000))}`).join('|');
+  if (grid.dataset.sig === sig) return;
+  grid.dataset.sig = sig;
+  grid.innerHTML = '';
+  for (const roomId of rooms) {
+    const room = st.ship.spaces.find((x) => x.id === roomId);
+    const left = Math.max(0, Math.ceil(((ready[roomId] || 0) - Date.now()) / 1000));
+    const b = el('button', 'door-btn', left ? `${room?.name || roomId} ${left}s` : (room?.name || roomId));
+    b.disabled = left > 0;
+    b.addEventListener('click', () => {
+      socket.emit('doors', { roomId }, (res) => {
+        if (res?.error) return toast(res.error);
+        sfx.door();
+        toast('Portas fechadas!');
+      });
+    });
+    grid.append(b);
   }
 }
 
@@ -604,8 +806,9 @@ function updateActionAvailability() {
       if (d < GAME_CONSTANTS.TASK_USE_DISTANCE + 0.5 && d < bestT) { bestT = d; taskHere = { ...t, consoleId: c.id }; }
     }
   }
-  useBtn.hidden = !(taskHere && alive) && !(st.sabotage && !st.you.role?.includes('impostor') && alive);
-  if (taskHere && alive) {
+  const canTask = alive || (st.you.role === 'crew' && st.settings.ghostsDoTasks);
+  useBtn.hidden = !(taskHere && canTask) && !(st.sabotage && st.you.role === 'crew' && alive);
+  if (taskHere && canTask) {
     useBtn.disabled = false;
     useBtn.querySelector('.action-label').textContent = 'Usar';
     useBtn.dataset.mode = 'task';
@@ -700,7 +903,10 @@ $('btnVent').addEventListener('click', () => {
     if (d < bd) { bd = d; best = v; }
   }
   if (!best) return toast('Nenhum duto por perto.');
-  socket.emit('vent', { ventId: best.id }, (res) => { if (res?.error) toast(res.error); });
+  socket.emit('vent', { ventId: best.id }, (res) => {
+    if (res?.error) return toast(res.error);
+    sfx.vent();
+  });
 });
 
 $('btnSabotage').addEventListener('click', () => {
@@ -709,11 +915,14 @@ $('btnSabotage').addEventListener('click', () => {
   for (const type of MAP_SABOTAGES[C.state.settings.map] || []) {
     const info = SABOTAGE_INFO[type];
     const b = el('button', 'sab-option');
-    b.innerHTML = `<span class="sab-ico">${type === 'lights' ? '💡' : type === 'reactor' ? '☢' : '📡'}</span>
+    b.innerHTML = `<span class="sab-ico">${type === 'lights' ? '💡' : type === 'reactor' ? '☢' : type === 'o2' ? '🫧' : '📡'}</span>
       <span><b>${info.name}</b><small>${info.desc}</small></span>`;
     b.addEventListener('click', () => {
       $('sabotageModal').setAttribute('hidden', '');
-      socket.emit('sabotage', { type }, (res) => { if (res?.error) toast(res.error); });
+      socket.emit('sabotage', { type }, (res) => {
+        if (res?.error) return toast(res.error);
+        sfx.sabotage();
+      });
     });
     list.append(b);
   }
@@ -743,9 +952,12 @@ function openTask(task, consoleId) {
       if (res?.error) return toast(res.error);
       if (res.finished) {
         toast(`Tarefa concluída: ${task.name}`);
+        sfx.taskDone();
+        flashScreen('', 120);
         closeTask();
       } else if (task.totalSteps > 1) {
         toast(`Passo ${res.step}/${res.totalSteps}`);
+        sfx.taskStep();
       }
     });
   };
@@ -805,35 +1017,56 @@ function renderMeeting(st) {
   const me = st.players.find((p) => p.id === st.you.id);
   const grid = $('voteGrid');
   const alreadyVoted = !!st.myVote;
-  grid.innerHTML = '';
+  const aliveCount = st.players.filter((p) => p.alive).length;
+  const votedCount = Object.keys(st.votes || {}).length;
 
-  const renderCard = (p) => {
+  // mesa de reunião: cada jogador sentado ao redor (como no jogo)
+  const sig = `${m.startedAt}:${st.myVote}:${isVoting}:${votedCount}:${JSON.stringify(st.votes)}`;
+  if (grid.dataset.sig === sig) {
+    renderChat(st);
+    return;
+  }
+  grid.dataset.sig = sig;
+  grid.className = 'vote-table';
+  grid.innerHTML = '<div class="vote-oval"></div><div class="vote-center"><span>THE SKELD</span><b>QUEM É O IMPOSTOR?</b><small>' +
+    `${votedCount}/${aliveCount} votaram</small></div>`;
+
+  const players = st.players;
+  const n = players.length;
+  const radX = n > 8 ? 39 : 34;
+  const radY = n > 8 ? 35 : 30;
+  players.forEach((p, i) => {
+    const ang = (-90 + (i * 360) / n) * (Math.PI / 180);
     const card = el('div', 'vote-card' + (p.alive ? '' : ' dead') + (st.myVote === p.id ? ' my-vote' : ''));
     card.dataset.id = p.id;
+    card.style.left = `${50 + radX * Math.cos(ang)}%`;
+    card.style.top = `${47 + radY * Math.sin(ang)}%`;
     const color = C.colors.find((c) => c.id === p.color)?.hex || '#888';
     const bean = el('div', 'vote-avatar');
     bean.innerHTML = miniBean(color);
     const name = el('div', 'vote-name', escapeHtml(p.name));
     card.append(bean, name);
+    if (p.id === me.id) card.classList.add('me');
     const votesFor = Object.values(st.votes || {}).filter((v) => v === p.id).length;
-    if (votesFor > 0) {
-      const badge = el('span', 'vote-votes', String(votesFor));
-      card.append(badge);
-    }
+    if (votesFor > 0) card.append(el('span', 'vote-votes', String(votesFor)));
     if (me.alive && !me.voted && isVoting && p.alive && p.id !== me.id) {
-      card.addEventListener('click', () => socket.emit('vote', { targetId: p.id }, (res) => { if (res?.error) toast(res.error); }));
+      card.addEventListener('click', () => socket.emit('vote', { targetId: p.id }, (res) => {
+        if (res?.error) return toast(res.error);
+        sfx.vote();
+      }));
     }
     grid.append(card);
-  };
-  for (const p of st.players) renderCard(p);
+  });
 
-  // pular
-  const skip = el('div', 'vote-card vote-skip' + (st.myVote === 'skip' ? ' my-vote' : ''));
-  skip.innerHTML = '<div class="vote-name">Pular voto</div>';
+  // pular voto
   const skipVotes = Object.values(st.votes || {}).filter((v) => v === 'skip').length;
-  if (skipVotes) skip.append(el('span', 'vote-votes', String(skipVotes)));
+  const skip = el('div', 'vote-skip' + (st.myVote === 'skip' ? ' my-vote' : ''));
+  skip.innerHTML = `<span>Pular voto</span>${skipVotes ? `<b>${skipVotes}</b>` : ''}`;
   if (me.alive && !me.voted && isVoting) {
-    skip.addEventListener('click', () => socket.emit('vote', { targetId: 'skip' }, (res) => { if (res?.error) toast(res.error); }));
+    skip.addEventListener('click', () => socket.emit('vote', { targetId: 'skip' }, (res) => {
+      if (res?.error) return toast(res.error);
+      sfx.vote();
+    }));
   }
   grid.append(skip);
 
@@ -951,6 +1184,123 @@ function toast(msg) {
 }
 
 /* ================================================================
+   Chat do lobby
+   ================================================================ */
+function renderLobbyChat(state) {
+  const log = $('lobbyChatLog');
+  const lines = (state.log || []).filter((l) => l.type === 'chat');
+  const sig = lines.map((l) => `${l.fromId || l.from}:${l.text}`).join('|');
+  if (log.dataset.sig === sig) return;
+  log.dataset.sig = sig;
+  log.innerHTML = '';
+  for (const line of lines) {
+    const color = C.colors.find((c) => c.id === line.color)?.hex || '#fff';
+    const div = el('div', 'chat-line');
+    div.innerHTML = `<span class="chat-who" style="color:${color}">${escapeHtml(line.from)}:</span><span class="chat-text">${escapeHtml(line.text)}</span>`;
+    log.append(div);
+  }
+  log.scrollTop = log.scrollHeight;
+}
+
+$('lobbyChatSend').addEventListener('click', sendLobbyChat);
+$('lobbyChatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendLobbyChat(); });
+function sendLobbyChat() {
+  const input = $('lobbyChatInput');
+  const text = input.value.trim();
+  if (!text) return;
+  socket.emit('chat', { text }, (res) => { if (res?.error) toast(res.error); });
+  input.value = '';
+}
+
+/* ================================================================
+   Mapa (Tab)
+   ================================================================ */
+function toggleMap(force) {
+  if (force === undefined && !C.mapOpen && C.state?.state !== 'tasks') return;
+  const open = force !== undefined ? force : !C.mapOpen;
+  C.mapOpen = open;
+  $('mapOverlay').hidden = !open;
+  if (open) {
+    sfx.click();
+    drawMapFrame();
+  }
+}
+
+function drawMapFrame() {
+  if (!C.mapOpen) return;
+  const st = C.state;
+  if (st?.you) renderer.drawMinimap($('mapCanvas'), st, st.you, C.colors);
+  requestAnimationFrame(drawMapFrame);
+}
+
+$('btnMap').addEventListener('click', () => toggleMap());
+$('mapClose').addEventListener('click', () => toggleMap(false));
+
+/* ================================================================
+   Som / tela
+   ================================================================ */
+$('btnMute').addEventListener('click', () => {
+  C.muted = !C.muted;
+  sfx.init();
+  sfx.setMuted(C.muted);
+  $('btnMute').classList.toggle('off', C.muted);
+  $('btnMute').textContent = C.muted ? 'MUDO' : 'SOM';
+  savePlayer();
+  if (!C.muted) sfx.click();
+});
+$('btnMute').classList.toggle('off', C.muted);
+$('btnMute').textContent = C.muted ? 'MUDO' : 'SOM';
+
+function flashScreen(kind = '', ms = 180) {
+  const f = $('screenFlash');
+  f.classList.toggle('red', kind === 'red');
+  f.classList.add('on');
+  setTimeout(() => f.classList.remove('on'), ms);
+}
+
+/* ================================================================
+   Cinemática de ejeção
+   ================================================================ */
+function showEject(meeting) {
+  if (!meeting || C.lastEjectAt === meeting.doneAt) return;
+  C.lastEjectAt = meeting.doneAt;
+  const overlay = $('ejectOverlay');
+  const crew = $('ejectCrew');
+  const ejected = C.state?.players.find((p) => p.id === meeting.ejectedId);
+  const color = ejected ? (C.colors.find((c) => c.id === ejected.color)?.hex || '#c51111') : '#7f8ea3';
+  crew.style.color = color;
+  crew.style.animation = 'none';
+  void crew.offsetWidth;
+  crew.style.animation = '';
+  overlay.hidden = false;
+  sfx.eject();
+  const text = $('ejectText');
+  const sub = $('ejectSub');
+  sub.className = 'eject-sub';
+  if (meeting.tie) {
+    text.textContent = 'Empate!';
+    sub.textContent = 'Ninguém foi ejetado.';
+    sub.classList.add('crew');
+  } else if (!meeting.ejectedId) {
+    text.textContent = 'Ninguém foi ejetado.';
+    sub.textContent = 'A tripulação pulou o voto.';
+    sub.classList.add('crew');
+  } else {
+    text.textContent = `${meeting.ejectedName || '???'} foi ejetado.`;
+    if (meeting.ejectedRole === 'impostor') {
+      sub.textContent = 'ERA O IMPOSTOR!';
+      sub.classList.add('crew');
+    } else if (meeting.ejectedRole === 'crew') {
+      sub.textContent = 'Não era o impostor.';
+    } else {
+      sub.textContent = 'Papel desconhecido.';
+    }
+  }
+  clearTimeout(C.ejectTimer);
+  C.ejectTimer = setTimeout(() => { overlay.hidden = true; }, 3600);
+}
+
+/* ================================================================
    Utilitários
    ================================================================ */
 function miniBean(hex) {
@@ -968,9 +1318,53 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/* ================================================================
+   Conexão, reconexão e expulsão
+   ================================================================ */
+function setNet(text, ok = false, sticky = false) {
+  const pill = $('netPill');
+  pill.textContent = text;
+  pill.classList.add('show');
+  pill.classList.toggle('ok', ok);
+  clearTimeout(setNet._t);
+  if (!sticky) setNet._t = setTimeout(() => pill.classList.remove('show'), 1800);
+}
+
 socket.on('connect', () => {
-  // se caiu a conexão, volta ao menu
-  if (C.state && C.code) {
-    // tenta reentrar
+  setNet('conectado', true);
+  // tenta retomar a sessão (queda de rede / recarregar a página)
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem('impostor:session') || 'null'); } catch { /* nada */ }
+  if (!C.session && saved && Date.now() - saved.at < 3 * 60 * 60 * 1000) {
+    socket.emit('resume', { code: saved.code, session: saved.session }, (res) => {
+      if (res?.error) {
+        localStorage.removeItem('impostor:session');
+        return;
+      }
+      C.session = res.session;
+      C.code = res.code;
+      C.me.color = res.color ?? C.me.color;
+      if (res.state === 'lobby') {
+        $('lobbyCode').textContent = res.code;
+      }
+      setNet('partida retomada', true);
+    });
+    return;
   }
+  if (!C.state) refreshGames();
+});
+
+socket.on('disconnect', (reason) => {
+  setNet(reason === 'io client disconnect' ? 'desconectado' : 'reconectando…', false, true);
+  sfx.stopAlarm();
+});
+
+socket.on('kicked', ({ by } = {}) => {
+  C.state = null;
+  C.code = null;
+  C.session = null;
+  localStorage.removeItem('impostor:session');
+  $('lobbyCode').textContent = '----';
+  showScreen('home');
+  toast(`Você foi removido da sala por ${by || 'host'}.`);
 });

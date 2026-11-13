@@ -20,9 +20,27 @@ if (!imp) { console.log('FALHA: sem impostor'); process.exit(1); }
 imp.killReadyAt = Date.now() + 3600_000;
 console.log(`partida: ${crew.length} tripulantes contra 1 impostor`);
 
+// fantasma do jogador humano: continua as tarefas que sobraram (como no jogo)
+const ghostDoTask = () => {
+  const human = g.players.get('me');
+  if (!human || human.alive || human.role !== 'crew') return;
+  for (const key of human.tasks) {
+    const t = g.tasks.find((x) => x.key === key);
+    if (!t || t.completedBy.has(human.id)) continue;
+    const prog = t.progress[human.id] || { step: 0 };
+    const c = t.consoles[Math.min(prog.step, t.consoles.length - 1)] || t.consoles[0];
+    human.x = c.x;
+    human.y = c.y;
+    const steps = g.taskSteps(t);
+    for (let i = 0; i < steps; i++) g.advanceTask(human.id, key, { consoleId: c.id });
+    return;
+  }
+};
+
 const t0 = Date.now();
 while (Date.now() - t0 < 180000) {
   await new Promise((r) => setTimeout(r, 1000));
+  ghostDoTask();
   if (g.state === 'ended') break;
   // impede reuniões (o teste é sobre tarefas)
   if (g.state === 'meeting') g.finishMeeting();

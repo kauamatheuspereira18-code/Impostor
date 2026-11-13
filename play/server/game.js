@@ -38,6 +38,9 @@ export class Game {
     this.startedAt = 0;
     this.taskBarSnapshot = { done: 0, total: 1 };
     this.round = 0;
+    this.doorsReadyAt = {};
+    this.lastKill = null;
+    this.meetingEndsAt = 0;
   }
 
   /* ============================ jogadores ============================ */
@@ -98,6 +101,53 @@ export class Game {
 
   get humanCount() {
     return [...this.players.values()].filter((p) => !p.isBot).length;
+  }
+
+  get connectedHumans() {
+    return [...this.players.values()].filter((p) => !p.isBot && p.connected !== false).length;
+  }
+
+  /** Troca o id de um jogador (reconexão), mantendo estado, tarefas e votos. */
+  rekeyPlayer(oldId, newId) {
+    const p = this.players.get(oldId);
+    if (!p || this.players.has(newId)) return null;
+    this.players.delete(oldId);
+    p.id = newId;
+    this.players.set(newId, p);
+    if (this.hostId === oldId) this.hostId = newId;
+    for (const b of this.bodies) if (b.playerId === oldId) b.playerId = newId;
+    for (const other of this.players.values()) if (other.votedFor === oldId) other.votedFor = newId;
+    for (const t of this.tasks) {
+      if (t.progress && t.progress[oldId]) { t.progress[newId] = t.progress[oldId]; delete t.progress[oldId]; }
+      if (t.completedBy?.has(oldId)) { t.completedBy.delete(oldId); t.completedBy.add(newId); }
+    }
+    if (this.meeting) {
+      if (this.meeting.callerId === oldId) this.meeting.callerId = newId;
+      if (this.meeting.ejectedId === oldId) this.meeting.ejectedId = newId;
+    }
+    if (this.lastKill) {
+      if (this.lastKill.victimId === oldId) this.lastKill.victimId = newId;
+      if (this.lastKill.killerId === oldId) this.lastKill.killerId = newId;
+    }
+    for (const l of this.log) if (l.fromId === oldId) l.fromId = newId;
+    this.push();
+    return p;
+  }
+
+  /**
+   * Marca o jogador como desconectado. A vaga fica reservada por alguns
+   * segundos para permitir reconexão (queda de rede, troca de aba etc.).
+   */
+  markDisconnected(id) {
+    const p = this.players.get(id);
+    if (!p) return;
+    p.connected = false;
+    p.disconnectedAt = Date.now();
+    if (this.hostId === id) {
+      const next = [...this.players.values()].find((x) => !x.isBot && x.connected !== false && x.id !== id);
+      if (next) this.hostId = next.id;
+    }
+    this.push();
   }
 
   fillBots() {
@@ -278,9 +328,9 @@ export class Game {
     let done = 0;
     for (const p of crew) {
       for (const key of p.tasks) {
-        // tarefas de tripulantes mortos saem da barra: no jogo, quem morreu não
-        // pode mais contribuir e a barra não pode ficar presa em 100% impossível
-        if (!p.alive) continue;
+        // como no jogo, as tarefas de quem morreu continuam na barra e podem
+        // ser concluídas pelo fantasma (quando a sala permite fantasmas em tarefas)
+        if (!p.alive && !this.settings.ghostsDoTasks) continue;
         total++;
         const task = this.tasks.find((t) => t.key === key);
         if (task?.completedBy.has(p.id)) done++;
@@ -319,7 +369,21 @@ export class Game {
   /* ============================ movimento ============================ */
   move(id, x, y) {
     const p = this.players.get(id);
-    if (!p || !p.alive || this.state === 'meeting') return;
+    if (!p || this.state === 'meeting' || this.state === 'ended') return;
+    if (!p.alive) {
+      // fantasmas atravessam paredes, mas com a mesma velocidade
+      const speed = GAME_CONSTANTS.BASE_SPEED * this.settings.playerSpeed * 1.15;
+      const maxStep = speed * 0.35 + 0.4;
+      const dx = clamp(x - p.x, -maxStep, maxStep);
+      const dy = clamp(y - p.y, -maxStep, maxStep);
+      if (Math.abs(dx) > 0.0001) p.facing = dx > 0 ? 1 : -1;
+      p.x += dx;
+      p.y += dy;
+      p.moving = Math.hypot(dx, dy) > 0.02;
+      p.lastMoveAt = Date.now();
+      return;
+    }
+    if (!p.alive) return;
     if (p.inVent) {
       // no duto: só pode ir para o próximo duto da rede
       const vent = this.ship.ventById(p.ventId);
@@ -346,7 +410,8 @@ export class Game {
   startTask(id, taskKey, consoleId) {
     const p = this.players.get(id);
     const task = this.tasks.find((t) => t.key === taskKey);
-    if (!p || !task || !p.alive) return { error: 'Tarefa inválida.' };
+    if (!p || !task) return { error: 'Tarefa inválida.' };
+    if (!p.alive && !(this.settings.ghostsDoTasks && p.role === 'crew')) return { error: 'Fantasmas não fazem tarefas nesta sala.' };
     if (p.role === 'impostor') return { error: 'Impostores não fazem tarefas.' };
     if (!p.tasks.includes(task.key)) return { error: 'Essa tarefa não é sua.' };
     if (task.completedBy.has(p.id)) return { error: 'Tarefa já concluída.' };
@@ -394,7 +459,8 @@ export class Game {
   advanceTask(id, taskKey, payload = {}) {
     const p = this.players.get(id);
     const task = this.tasks.find((t) => t.key === taskKey);
-    if (!p || !task || !p.alive) return { error: 'Tarefa inválida.' };
+    if (!p || !task) return { error: 'Tarefa inválida.' };
+    if (!p.alive && !(this.settings.ghostsDoTasks && p.role === 'crew')) return { error: 'Fantasmas não fazem tarefas nesta sala.' };
     if (!p.tasks.includes(task.key)) return { error: 'Essa tarefa não é sua.' };
     if (task.completedBy.has(p.id)) return { error: 'Tarefa já concluída.' };
     if (this.sabotage?.type === 'comms') return { error: 'Comunicação caída.' };
@@ -434,6 +500,16 @@ export class Game {
     target.alive = false;
     target.inVent = false;
     target.killedAt = Date.now();
+    target.deathAt = Date.now();
+    this.lastKill = {
+      at: Date.now(),
+      x: target.x,
+      y: target.y,
+      victimId: target.id,
+      victimColor: target.color,
+      killerId,
+      room: this.ship.roomAt(target.x, target.y),
+    };
     target.killedBy = killerId;
     killer.kills++;
     killer.killReadyAt = Date.now() + this.settings.killCooldown * 1000;
@@ -525,7 +601,7 @@ export class Game {
       by: playerId,
       fixedBy: [],
       roomId: info.room,
-      requiredFixes: type === 'reactor' ? 2 : 1,
+      requiredFixes: (type === 'reactor' || type === 'o2') ? 2 : 1,
     };
     this.log.push({ type: 'sabotage', text: `Sabotagem: ${info.name}!` });
     this.push();
@@ -569,8 +645,16 @@ export class Game {
   closeDoors(playerId, roomId) {
     const p = this.players.get(playerId);
     if (this.state !== 'tasks' || !p?.alive || p.role !== 'impostor') return { error: 'Só impostores fecham portas.' };
+    if (!roomId) return { error: 'Escolha uma sala.' };
+    const readyAt = this.doorsReadyAt[roomId] || 0;
+    if (Date.now() < readyAt) {
+      return { error: `Portas desta sala em cooldown (${Math.ceil((readyAt - Date.now()) / 1000)}s).` };
+    }
     const count = this.ship.closeDoors(roomId, GAME_CONSTANTS.DOOR_TIME * 1000);
     if (!count) return { error: 'Essa sala não tem portas.' };
+    this.doorsReadyAt[roomId] = Date.now() + GAME_CONSTANTS.DOOR_COOLDOWN * 1000;
+    const roomName = this.ship.roomById?.[roomId]?.name || roomId;
+    this.log.push({ type: 'system', text: `Portas fechadas em ${roomName}.` });
     this.push();
     return { ok: true, doors: count };
   }
@@ -604,6 +688,8 @@ export class Game {
       callerName: caller?.name || '?',
       reason,
       bodyRoom: body?.room || null,
+      bodyPlayerId: body?.playerId || null,
+      bodyName: body ? (this.players.get(body.playerId)?.name || '?') : null,
       startedAt: now,
       discussionUntil: now + this.settings.discussionTime * 1000,
       votingUntil: now + (this.settings.discussionTime + this.settings.votingTime) * 1000,
@@ -754,6 +840,7 @@ export class Game {
     m.tie = tie;
     m.skipped = !topId && !tie;
     m.voteTally = Object.fromEntries(tally);
+    m.doneAt = Date.now();
 
     if (m.ejectedId) {
       const ejected = this.players.get(m.ejectedId);
@@ -762,6 +849,16 @@ export class Game {
         ejected.ejected = true;
         ejected.killedAt = Date.now();
         const reveal = this.settings.confirmImpostor;
+        m.ejectedName = ejected.name;
+        m.ejectedColor = ejected.color;
+        m.ejectedRole = reveal ? ejected.role : null;
+        this.lastEject = {
+          name: ejected.name,
+          color: ejected.color,
+          role: reveal ? ejected.role : null,
+          id: ejected.id,
+          at: Date.now(),
+        };
         this.log.push({
           type: 'eject',
           text: `${ejected.name} foi ejetado.${reveal ? (ejected.role === 'impostor' ? ' ERA O IMPOSTOR!' : ' Não era o impostor.') : ''}`,
@@ -853,7 +950,12 @@ export class Game {
   /* ============================ bots ============================ */
   tickBots(dt, now) {
     for (const p of this.players.values()) {
-      if (!p.isBot || !p.alive) continue;
+      if (!p.isBot) continue;
+      if (!p.alive) {
+        // como no jogo, o fantasma continua terminando as tarefas
+        if (p.role === 'crew' && this.settings.ghostsDoTasks) this.tickGhostBot(p, dt, now);
+        continue;
+      }
       const bs = p.botState;
       if (p.inVent) { this.exitVent(p.id); continue; }
 
@@ -951,6 +1053,46 @@ export class Game {
       }
       bs.goal = null;
       bs.idleUntil = now + rand(60, 220);
+    }
+  }
+
+  /** Fantasma (bot): atravessa paredes e termina as tarefas restantes. */
+  tickGhostBot(p, dt, now) {
+    const bs = p.botState;
+    const pending = (p.tasks || []).filter((key) => {
+      const t = this.tasks.find((x) => x.key === key);
+      return t && !t.completedBy.has(p.id);
+    });
+    if (!pending.length) { p.moving = false; return; }
+    if (!bs.ghostTask || !pending.includes(bs.ghostTask)) {
+      bs.ghostTask = pending[Math.floor(Math.random() * pending.length)];
+      bs.taskUntil = 0;
+    }
+    const task = this.tasks.find((t) => t.key === bs.ghostTask);
+    if (!task) return;
+    const prog = task.progress[p.id] || { step: 0 };
+    const console_ = task.consoles[Math.min(prog.step, task.consoles.length - 1)] || task.consoles[0];
+    if (!console_) return;
+    const d = dist(p, console_);
+    if (d > 0.5) {
+      const step = GAME_CONSTANTS.BASE_SPEED * this.settings.playerSpeed * 0.95 * dt;
+      const dx = ((console_.x - p.x) / d) * step;
+      const dy = ((console_.y - p.y) / d) * step;
+      if (Math.abs(dx) > 1e-5) p.facing = dx > 0 ? 1 : -1;
+      p.x += dx;
+      p.y += dy;
+      p.moving = true;
+      return;
+    }
+    p.moving = false;
+    if (!bs.taskUntil) bs.taskUntil = now + rand(900, 2000);
+    if (now >= bs.taskUntil) {
+      const total = this.taskSteps(task);
+      for (let i = 0; i < total; i++) {
+        this.advanceTask(p.id, task.key, { consoleId: console_.id, data: 'ghost' });
+      }
+      bs.taskUntil = 0;
+      bs.ghostTask = null;
     }
   }
 
@@ -1100,6 +1242,7 @@ export class Game {
         voted: p.voted,
         inVent: p.id === forId ? p.inVent : false,
         ejected: p.ejected || false,
+        connected: p.connected !== false,
         taskCount: p.tasks?.length || 0,
       };
     });
@@ -1122,6 +1265,7 @@ export class Game {
         }))),
         vents: isImp || this.state === 'ended' ? this.ship.data.vents : [],
         doors: this.ship.serializedDoors(),
+        mapName: 'The Skeld',
         emergency: this.ship.emergency,
       },
       you: me ? {
@@ -1136,6 +1280,10 @@ export class Game {
         kills: me.kills,
         inVent: me.inVent,
         ventId: me.ventId,
+        sabotageReadyAt: this.sabotageReadyAt,
+        doorsReadyAt: this.doorsReadyAt,
+        connected: me.connected !== false,
+        roleName: me.role === 'impostor' ? 'Impostor' : (this.settings.roles?.engineer && me.roleType === 'Engineer' ? 'Engenheiro' : 'Tripulante'),
         impostorTeammates: isImp
           ? [...this.players.values()].filter((p) => p.role === 'impostor' && p.id !== forId).map((p) => ({ id: p.id, name: p.name, color: p.color }))
           : [],
@@ -1153,6 +1301,9 @@ export class Game {
       lightsOut: this.sabotage?.type === 'lights',
       commsDown: this.sabotage?.type === 'comms',
       meeting: this.meeting,
+      lastKill: this.lastKill,
+      lastEject: this.lastEject || null,
+      doorsReadyAt: this.doorsReadyAt,
       votes: this.state === 'meeting'
         ? Object.fromEntries([...this.players.values()].filter((p) => p.voted).map((p) => [p.id, this.settings.anonymousVotes && p.id !== forId ? null : p.votedFor]))
         : {},
@@ -1166,8 +1317,11 @@ export class Game {
       emergencyUsed: this.emergencyUsed,
       emergencyLeft: this.settings.emergencyMeetings - this.emergencyUsed,
       sabotageReadyAt: this.sabotageReadyAt,
-      log: this.log.slice(-12),
+      log: this.log.slice(-40),
       startedAt: this.startedAt,
+      aliveCount: this.players.size ? [...this.players.values()].filter((p) => p.alive).length : 0,
+      totalCount: this.players.size,
+      impostorCount: this.settings.numImpostors,
     };
   }
 

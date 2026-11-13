@@ -1,5 +1,6 @@
 import express from 'express';
 import { createServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -48,6 +49,32 @@ app.get('/api/info', (req, res) => {
     totalGames: games.size,
   });
 });
+
+/** Salas públicas (aparecem no navegador de partidas). */
+function publicGames() {
+  return [...games.values()]
+    .filter((g) => g.connectedHumans > 0 && g.isPublic !== false)
+    .map((g) => {
+      const humans = [...g.players.values()].filter((p) => !p.isBot);
+      const bots = g.players.size - humans.length;
+      return {
+        code: g.code,
+        state: g.state,
+        map: g.settings.map,
+        players: g.players.size,
+        humans: humans.length,
+        bots,
+        max: g.settings.maxPlayers,
+        host: humans.find((p) => p.id === g.hostId)?.name || humans[0]?.name || '—',
+        confetti: g.settings.numImpostors,
+        createdAt: g.createdAt,
+        joinable: g.state === 'lobby' && g.players.size < g.settings.maxPlayers,
+      };
+    })
+    .sort((a, b) => b.humans - a.humans || a.createdAt - b.createdAt);
+}
+
+app.get('/api/games', (req, res) => res.json({ games: publicGames() }));
 app.get('/api/health', (req, res) => res.json({ ok: true, games: games.size }));
 
 const games = new Map();
@@ -80,6 +107,7 @@ function broadcast(game) {
 function createGame() {
   const code = newCode();
   const game = new Game(code, null);
+  game.createdAt = Date.now();
   game.onUpdate = () => broadcast(game);
   games.set(code, game);
   const cleaner = setInterval(() => {
@@ -110,43 +138,54 @@ io.on('connection', (socket) => {
     return player;
   };
 
-  socket.on('create', ({ name, color } = {}, cb) => {
+  socket.on('create', ({ name, color, isPublic = true } = {}, cb) => {
     const game = createGame();
-    joinRoom(game, name, color);
-    reply(cb, { ok: true, code: game.code, id: socket.id });
+    game.isPublic = isPublic !== false;
+    const p = joinRoom(game, name, color);
+    p.session = randomUUID();
+    reply(cb, { ok: true, code: game.code, id: socket.id, color: p.color, session: p.session });
   });
 
   socket.on('join', ({ code, name, color } = {}, cb) => {
     const game = games.get(String(code || '').toUpperCase().trim());
     if (!game) return reply(cb, { error: 'Sala não encontrada.' });
     if (game.state !== 'lobby') return reply(cb, { error: 'Partida em andamento.' });
-    if (game.players.size >= 15) return reply(cb, { error: 'Sala cheia.' });
+    if (game.players.size >= game.settings.maxPlayers) return reply(cb, { error: 'Sala cheia.' });
     const p = joinRoom(game, name, color);
-    reply(cb, { ok: true, code: game.code, id: socket.id, color: p.color });
+    p.session = randomUUID();
+    reply(cb, { ok: true, code: game.code, id: socket.id, color: p.color, session: p.session });
   });
 
   socket.on('quickplay', ({ name, color, bots = 9 } = {}, cb) => {
-    let game = [...games.values()].find((g) => g.state === 'lobby' && g.players.size < 15 && g.humanCount > 0);
-    if (!game) {
-      game = createGame();
-      const p = joinRoom(game, name, color);
-      game.setSettings({ maxPlayers: Math.max(6, Math.min(10, bots + 1)) });
-      game.fillBots();
-      reply(cb, { ok: true, code: game.code, id: socket.id, color: p.color });
+    const open = [...games.values()].find((g) =>
+      g.state === 'lobby' && g.connectedHumans > 0 && g.players.size < g.settings.maxPlayers);
+    if (open) {
+      const p = joinRoom(open, name, color);
+      p.session = randomUUID();
+      reply(cb, { ok: true, code: open.code, id: socket.id, color: p.color, session: p.session, joined: true });
       return;
     }
+    const game = createGame();
     const p = joinRoom(game, name, color);
-    reply(cb, { ok: true, code: game.code, id: socket.id, color: p.color });
+    p.session = randomUUID();
+    game.setSettings({ maxPlayers: Math.max(6, Math.min(10, bots + 1)) });
+    game.fillBots();
+    reply(cb, { ok: true, code: game.code, id: socket.id, color: p.color, session: p.session, joined: false });
   });
+
+  /* lista de salas pela socket (tempo real) */
+  socket.on('listGames', (data, cb) => reply(ackArg(data, cb), { ok: true, games: publicGames() }));
 
   socket.on('solo', ({ name, color } = {}, cb) => {
     // salinha só sua com bots, começa já
     const game = createGame();
+    game.isPublic = false;
     const p = joinRoom(game, name, color);
     game.setSettings({ maxPlayers: 10, numImpostors: 2 });
     game.fillBots();
+    p.session = randomUUID();
     game.startGame();
-    reply(cb, { ok: true, code: game.code, id: socket.id, color: p.color });
+    reply(cb, { ok: true, code: game.code, id: socket.id, color: p.color, session: p.session });
   });
 
   socket.on('setSettings', ({ patch, preset, applyToBots } = {}, cb) => {
@@ -286,6 +325,43 @@ io.on('connection', (socket) => {
     reply(cb, { ok: true });
   });
 
+  /* reconexão: mesma sessão, novo socket */
+  socket.on('resume', ({ code, session } = {}, cb) => {
+    const game = games.get(String(code || '').toUpperCase().trim());
+    if (!game) return reply(cb, { error: 'Sala não existe mais.' });
+    const player = [...game.players.values()].find((p) => !p.isBot && p.session === session);
+    if (!player) return reply(cb, { error: 'Sessão expirada.' });
+    if (player.id !== socket.id) {
+      const oldId = player.id;
+      const moved = game.rekeyPlayer(oldId, socket.id);
+      if (!moved) return reply(cb, { error: 'Não foi possível retomar.' });
+      if (game.hostId === oldId) game.hostId = socket.id;
+    }
+    player.connected = true;
+    delete player.disconnectedAt;
+    socketGame.set(socket.id, game.code);
+    socket.join(game.code);
+    broadcast(game);
+    reply(cb, {
+      ok: true, code: game.code, id: socket.id, color: player.color,
+      session, resumed: true, state: game.state,
+    });
+  });
+
+  /* host remove um jogador */
+  socket.on('kick', ({ targetId } = {}, cb) => {
+    const game = getGame(socket.id);
+    if (!game) return reply(cb, { error: 'Sem sala.' });
+    if (game.hostId !== socket.id) return reply(cb, { error: 'Só o host pode remover.' });
+    if (targetId === socket.id) return reply(cb, { error: 'Você não pode se remover.' });
+    const target = game.players.get(targetId);
+    if (!target) return reply(cb, { error: 'Jogador não encontrado.' });
+    io.to(targetId).emit('kicked', { by: game.players.get(socket.id)?.name || 'host' });
+    socketGame.delete(targetId);
+    game.removePlayer(targetId);
+    reply(cb, { ok: true });
+  });
+
   socket.on('toLobby', (a, b) => {
     const cb = ackArg(a, b);
     const game = getGame(socket.id);
@@ -300,14 +376,36 @@ io.on('connection', (socket) => {
     if (game) {
       game.removePlayer(socket.id);
       socket.leave(game.code);
+      if (game.humanCount === 0) {
+        game.stopTicking();
+        games.delete(game.code);
+      }
     }
     socketGame.delete(socket.id);
   });
 
   socket.on('disconnect', () => {
     const game = getGame(socket.id);
-    if (game) game.removePlayer(socket.id);
     socketGame.delete(socket.id);
+    if (!game) return;
+    const player = game.players.get(socket.id);
+    if (!player) return;
+    const code = game.code;
+    const pid = socket.id;
+    game.markDisconnected(pid);
+    // segura a vaga por 45s (reconexão), depois remove
+    const timer = setTimeout(() => {
+      const g = games.get(code);
+      if (!g) return;
+      const still = g.players.get(pid);
+      if (!still || still.connected !== false) return;
+      g.removePlayer(pid);
+      if (g.humanCount === 0) {
+        g.stopTicking();
+        games.delete(code);
+      }
+    }, 45000);
+    if (timer.unref) timer.unref();
   });
 });
 

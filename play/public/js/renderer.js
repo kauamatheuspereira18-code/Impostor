@@ -1,8 +1,12 @@
-/* Renderização do mapa Skeld com a geometria real do navio. */
+/* Renderização do Skeld com a geometria oficial, arte procedural e animações. */
 import { GAME_CONSTANTS } from '/shared/rules.js';
 import { COLORS } from '/shared/mapdata.js';
+import {
+  drawSpace, drawCrew, drawCorpse, drawVent, drawDoor,
+  drawEmergencyButton, drawMeetingTable, shade,
+} from './art.js';
 
-const VIEW = { x1: -27.5, y1: -19, x2: 23, y2: 11 };
+const lerp = (a, b, t) => a + (b - a) * t;
 
 export class Renderer {
   constructor(canvas) {
@@ -10,26 +14,62 @@ export class Renderer {
     this.ctx = canvas.getContext('2d');
     this.dpr = Math.min(2, window.devicePixelRatio || 1);
     this.camera = { x: -2, y: -2 };
-    this.zoom = 1;
+    this.camLead = { x: 0, y: 0 };
+    this.zoom = 60;
+    this.time = 0;
+    this.last = performance.now();
+    this.shakeAmount = 0;
+    this.shakeUntil = 0;
+    this.kills = [];
+    const doc = this.canvas.ownerDocument || (typeof document !== 'undefined' ? document : null);
+    this.overlay = doc ? doc.createElement('canvas') : null;
+    this.overlayCtx = this.overlay ? this.overlay.getContext('2d') : null;
+    this.smooth = new Map();
+    this.markers = [];
     this.resize();
   }
 
   resize() {
     const rect = this.canvas.getBoundingClientRect();
-    this.w = rect.width;
-    this.h = rect.height;
+    this.w = Math.max(320, rect.width);
+    this.h = Math.max(320, rect.height);
     this.canvas.width = Math.floor(this.w * this.dpr);
     this.canvas.height = Math.floor(this.h * this.dpr);
-    this.fitZoom();
+    if (this.overlay) {
+      this.overlay.width = this.canvas.width;
+      this.overlay.height = this.canvas.height;
+    }
+    // enquadramento do navio inteiro (usado no mapa/screenshot)
+    this.fitScale = Math.min(this.w / 52, this.h / 32);
+    // escala de jogo: o personagem tem ~1 unidade de altura, como no original
+    this.zoom = Math.max(38, Math.min(96, Math.min(this.w / 15, this.h / 10)));
   }
 
-  fitZoom() {
-    const vw = VIEW.x2 - VIEW.x1;
-    const vh = VIEW.y2 - VIEW.y1;
-    // zoom "de jogo": a câmera segue o jogador e mostra ~2 salas de largura
-    this.fitScale = Math.min(this.w / vw, this.h / vh);
-    this.baseZoom = Math.max(34, Math.min(62, this.w / 26));
-    this.zoom = this.baseZoom;
+  /* ---------------- câmera ---------------- */
+  follow(player) {
+    if (!player) return;
+    const k = 0.16;
+    this.camera.x = lerp(this.camera.x, player.x + this.camLead.x, k);
+    this.camera.y = lerp(this.camera.y, player.y + this.camLead.y, k);
+    this.camLead.x *= 0.92;
+    this.camLead.y *= 0.92;
+  }
+
+  lead(dx, dy) {
+    const max = 1.2;
+    this.camLead.x = Math.max(-max, Math.min(max, this.camLead.x + dx * 0.5));
+    this.camLead.y = Math.max(-max, Math.min(max, this.camLead.y + dy * 0.5));
+  }
+
+  shake(amount, ms = 380) {
+    this.shakeAmount = Math.max(this.shakeAmount, amount);
+    this.shakeUntil = performance.now() + ms;
+  }
+
+  /** Registra a animação de abate entre dois pontos. */
+  killAt(victim, killer) {
+    this.kills.push({ x: victim.x, y: victim.y, color: victim.color, killer, t0: performance.now() });
+    this.shake(9, 520);
   }
 
   worldToScreen(x, y) {
@@ -46,249 +86,122 @@ export class Renderer {
     };
   }
 
-  follow(player) {
-    if (!player) return;
-    this.camera.x += (player.x - this.camera.x) * 0.15;
-    this.camera.y += (player.y - this.camera.y) * 0.15;
-  }
-
+  /* ---------------- loop ---------------- */
   render(state, me, opts = {}) {
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - this.last) / 1000);
+    this.last = now;
+    this.time += dt;
+
     const { ctx } = this;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, this.w, this.h);
     if (!state) return;
 
-    const lightsOut = !!state.lightsOut;
-    const vision = me?.role === 'impostor' ? state.settings.impostorVision : state.settings.crewVision;
-    const dark = lightsOut ? 0.94 : (me?.role === 'impostor' ? 0.55 : 0.72);
+    // tremor de câmera
+    let ox = 0;
+    let oy = 0;
+    if (now < this.shakeUntil) {
+      const k = this.shakeAmount * Math.pow((this.shakeUntil - now) / 520, 1.6);
+      ox = (Math.random() - 0.5) * k;
+      oy = (Math.random() - 0.5) * k;
+    } else this.shakeAmount = 0;
+    ctx.save();
+    ctx.translate(ox, oy);
 
-    ctx.fillStyle = '#04060b';
-    ctx.fillRect(0, 0, this.w, this.h);
-    this.drawSpace();
+    drawSpace(ctx, this.w, this.h, this.time, this.camera.x, this.camera.y, this.zoom);
+
     this.drawShip(state, opts);
+    for (const body of state.bodies || []) this.drawBody(body, state);
+    this.drawKills(state);
 
-    const scaleZ = this.zoom;
-    // corpos
-    for (const body of state.bodies || []) this.drawBody(body, scaleZ);
-    // jogadores
-    for (const p of state.players) {
+    const players = state.players || [];
+    for (const p of players) {
       if (!p.alive) continue;
       if (p.inVent && p.id !== me?.id) continue;
-      this.drawPlayer(p, p.id === me?.id, scaleZ, state);
+      this.drawPlayer(p, p.id === me?.id, state);
     }
-    // fantasmas
-    for (const p of state.players) {
+    for (const p of players) {
       if (p.alive) continue;
-      this.drawGhost(p, scaleZ, state);
-    }
-    // dutos para impostor
-    if (me?.role === 'impostor' && state.ship?.vents?.length) this.drawVents(state.ship.vents, scaleZ, me);
-    // portas fechadas
-    for (const d of state.ship?.doors || []) {
-      if (d.open) continue;
-      const s = this.worldToScreen(d.x, d.y);
-      ctx.save();
-      ctx.translate(s.x, s.y);
-      ctx.fillStyle = '#8b96ad';
-      ctx.fillRect(-0.9 * scaleZ, -0.28 * scaleZ, 1.8 * scaleZ, 0.56 * scaleZ);
-      ctx.strokeStyle = '#e2e8f5';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(-0.9 * scaleZ, -0.28 * scaleZ, 1.8 * scaleZ, 0.56 * scaleZ);
-      ctx.restore();
+      this.drawGhost(p, state);
     }
 
-    // escuridão / visão
-    this.drawVision(me, state, dark, vision);
+    if (me?.role === 'impostor' && state.ship?.vents?.length) this.drawVents(state.ship.vents, me);
+    this.drawDoors(state);
+    this.drawTaskArrow(state, me);
+
+    const lightsOut = !!state.lightsOut;
+    const dark = lightsOut ? 0.9 : (me?.role === 'impostor' ? 0.42 : 0.6);
+    const vision = me?.role === 'impostor' ? state.settings.impostorVision : state.settings.crewVision;
+    this.drawVision(state, me, dark, vision, lightsOut);
 
     if (state.commsDown) this.drawCommsStatic();
     if (lightsOut) this.drawElectricalFlicker();
+    ctx.restore();
   }
 
-  drawSpace() {
-    const { ctx } = this;
-    ctx.fillStyle = '#050810';
-    ctx.fillRect(0, 0, this.w, this.h);
-    // estrelas fixas
-    ctx.fillStyle = 'rgba(200,220,255,0.35)';
-    for (let i = 0; i < 90; i++) {
-      const x = ((i * 379) % this.w);
-      const y = ((i * 211) % this.h);
-      const s = i % 7 === 0 ? 2 : 1;
-      ctx.globalAlpha = 0.25 + ((i * 37) % 60) / 100;
-      ctx.fillRect(x, y, s, s);
-    }
-    ctx.globalAlpha = 1;
-  }
-
-  /** Desenha as salas/corredores do navio. */
+  /* ---------------- navio ---------------- */
   drawShip(state, opts = {}) {
     const { ctx } = this;
     const spaces = state.ship?.spaces || [];
-    const corridors = opts.corridors || [];
+    const corridors = state.ship?.corridors || opts.corridors || [];
     const z = this.zoom;
 
-    // Piso metálico contínuo (salas + corredores têm o mesmo chão)
-    for (const space of spaces) this.fillPlanWorld(space.shapes, '#63799c');
-    for (const c of corridors) this.fillPlanWorld(c.shapes, '#5a6f90');
-    // hachura sutil do piso
-    this.drawFloorTiles(spaces, corridors);
+    // sombra do casco no espaço
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    this.fillPlanWorld([...spaces, ...corridors], '#02040a', 0.5);
+    ctx.restore();
 
-    // cada sala tem sua parede (contorno da planta)
+    // corredores primeiro (piso + paredes) para que as salas fiquem por cima
+    for (const c of corridors) this.fillPlanWorld(c.shapes, '#556680');
+    for (const c of corridors) this.strokePlanOutline(c.shapes, z, true);
+    for (const space of spaces) this.fillPlanWorld(space.shapes, '#5e6f8f');
+    this.drawFloorTiles(spaces, corridors);
     for (const space of spaces) this.strokePlanOutline(space.shapes, z);
 
-    // consoles oficiais do jogo (posições vindas dos dados, não desenhadas à mão)
+    // consoles oficiais (posições vindas dos dados do jogo)
     for (const c of state.ship?.consoles || []) this.drawConsole(c, z, state);
 
-    // props decorativos das salas
-    for (const space of spaces) {
-      const label = space.name;
-      const [x1, , x2, y2] = space.bounds || [0, 0, 0, 0];
-      this.drawRoomLabel(label, (x1 + x2) / 2, y2 - 0.75, space.id);
-      for (const p of space.props || []) this.drawProp(p, z, state);
+    // mesa central da Cafeteria
+    const cafe = spaces.find((s) => s.id === 'Cafeteria');
+    if (cafe) {
+      const [x1, , x2, y2] = cafe.bounds || [0, 0, 0, 0];
+      drawMeetingTable(ctx, { x: this.worldToScreen((x1 + x2) / 2, y2 - 3.4).x, y: this.worldToScreen((x1 + x2) / 2, y2 - 3.4).y, size: z * 0.5 });
     }
 
-    // tarefas do jogador (marcadores)
-    if (state.you?.role === 'crew') {
-      for (const t of state.you.tasks || []) {
-        if (t.done) continue;
-        for (const c of t.consoles) this.drawTaskMarker(c, state);
-      }
+    // props + nomes das salas
+    for (const space of spaces) {
+      const [x1, , x2, y2] = space.bounds || [0, 0, 0, 0];
+      for (const p of space.props || []) this.drawProp(p, z, state);
+      this.drawRoomLabel(space.name, (x1 + x2) / 2, y2 - 0.75);
     }
+
     // botão de emergência
     if (state.ship?.emergency) {
       const e = state.ship.emergency;
       const s = this.worldToScreen(e.x, e.y);
-      ctx.save();
-      ctx.translate(s.x, s.y);
-      ctx.fillStyle = '#c62b3b';
-      ctx.beginPath();
-      ctx.arc(0, 0, 0.42 * z, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#ffd7db';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.restore();
+      drawEmergencyButton(ctx, { x: s.x, y: s.y, size: z * 0.8, t: this.time, disabled: state.emergencyLeft <= 0 });
     }
-  }
 
-  /** Console de tarefa oficial. O visual depende do tipo (como no jogo). */
-  drawConsole(c, z, state) {
-    const { ctx } = this;
-    const s = this.worldToScreen(c.x, c.y);
-    const mine = (state.you?.tasks || []).find((t) => (t.consoles || []).some((x) => x.id === c.id && x.room === c.room));
-    ctx.save();
-    ctx.translate(s.x, s.y);
-    const body = '#2f3d54';
-    const edge = '#8fb4e6';
-    const glow = 'rgba(120, 220, 255, 0.9)';
-    const unit = z * 0.34;
-    switch (c.task) {
-      case 'SwipeCard': // leitor de cartão na parede
-        ctx.fillStyle = body; ctx.fillRect(-unit * 1.1, -unit * 0.75, unit * 2.2, unit * 1.5);
-        ctx.strokeStyle = edge; ctx.lineWidth = 1.5; ctx.strokeRect(-unit * 1.1, -unit * 0.75, unit * 2.2, unit * 1.5);
-        ctx.fillStyle = glow; ctx.fillRect(-unit * 0.8, -unit * 0.45, unit * 1.6, unit * 0.28);
-        break;
-      case 'FixWiring': // painel elétrico
-        ctx.fillStyle = body; ctx.fillRect(-unit, -unit, unit * 2, unit * 2);
-        ctx.strokeStyle = edge; ctx.lineWidth = 1.5; ctx.strokeRect(-unit, -unit, unit * 2, unit * 2);
-        ctx.strokeStyle = '#e8b64c'; ctx.lineWidth = 1.2; ctx.beginPath();
-        ctx.moveTo(-unit * 0.6, -unit * 0.5); ctx.lineTo(unit * 0.2, 0); ctx.lineTo(-unit * 0.2, unit * 0.2); ctx.lineTo(unit * 0.6, unit * 0.6);
-        ctx.stroke();
-        break;
-      case 'DownloadData':
-      case 'UploadData': // painel de dados
-        ctx.fillStyle = body; ctx.fillRect(-unit, -unit * 0.8, unit * 2, unit * 1.6);
-        ctx.strokeStyle = '#7fe3b0'; ctx.lineWidth = 1.5; ctx.strokeRect(-unit, -unit * 0.8, unit * 2, unit * 1.6);
-        ctx.fillStyle = glow; ctx.fillRect(-unit * 0.7, -unit * 0.45, unit * 1.4, unit * 0.9);
-        break;
-      case 'EmptyGarbage':
-      case 'FuelEngines': // chute/alavanca
-        ctx.fillStyle = '#4a5c78'; ctx.fillRect(-unit * 1.2, -unit * 0.6, unit * 2.4, unit * 1.2);
-        ctx.strokeStyle = edge; ctx.strokeRect(-unit * 1.2, -unit * 0.6, unit * 2.4, unit * 1.2);
-        ctx.fillStyle = '#e8b64c'; ctx.beginPath(); ctx.arc(0, 0, unit * 0.35, 0, Math.PI * 2); ctx.fill();
-        break;
-      case 'DivertPower': // caixa de energia
-        ctx.fillStyle = '#24344d'; ctx.fillRect(-unit, -unit, unit * 2, unit * 2);
-        ctx.strokeStyle = '#f0d25a'; ctx.lineWidth = 1.5; ctx.strokeRect(-unit, -unit, unit * 2, unit * 2);
-        ctx.fillStyle = '#f0d25a'; ctx.beginPath();
-        ctx.moveTo(-unit * 0.2, -unit * 0.6); ctx.lineTo(unit * 0.35, -unit * 0.05); ctx.lineTo(0, -unit * 0.05);
-        ctx.lineTo(unit * 0.2, unit * 0.6); ctx.lineTo(-unit * 0.35, unit * 0.05); ctx.lineTo(0, unit * 0.05);
-        ctx.closePath(); ctx.fill();
-        break;
-      case 'StartReactor': // alavanca do reator
-        ctx.fillStyle = '#243b33'; ctx.fillRect(-unit * 1.3, -unit * 0.7, unit * 2.6, unit * 1.4);
-        ctx.strokeStyle = '#6ef0b5'; ctx.lineWidth = 1.5; ctx.strokeRect(-unit * 1.3, -unit * 0.7, unit * 2.6, unit * 1.4);
-        ctx.strokeStyle = '#6ef0b5'; ctx.beginPath(); ctx.moveTo(-unit * 0.5, unit * 0.3); ctx.lineTo(unit * 0.5, -unit * 0.3); ctx.stroke();
-        break;
-      case 'ResetSeismic':
-      case 'StabilizeSteering': // volante
-        ctx.strokeStyle = edge; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, unit * 0.9, 0, Math.PI * 2); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(-unit * 0.9, 0); ctx.lineTo(unit * 0.9, 0);
-        ctx.moveTo(0, 0); ctx.lineTo(0, unit * 0.9); ctx.stroke();
-        break;
-      case 'PrimeShields':
-      case 'ClearAsteroids': // console de armas
-        ctx.fillStyle = body; ctx.fillRect(-unit * 1.1, -unit * 0.9, unit * 2.2, unit * 1.8);
-        ctx.strokeStyle = edge; ctx.lineWidth = 1.5; ctx.strokeRect(-unit * 1.1, -unit * 0.9, unit * 2.2, unit * 1.8);
-        ctx.fillStyle = '#ff8a5c'; ctx.beginPath(); ctx.arc(0, 0, unit * 0.3, 0, Math.PI * 2); ctx.fill();
-        break;
-      default: // console genérico
-        ctx.fillStyle = body; ctx.fillRect(-unit, -unit * 0.85, unit * 2, unit * 1.7);
-        ctx.strokeStyle = edge; ctx.lineWidth = 1.5; ctx.strokeRect(-unit, -unit * 0.85, unit * 2, unit * 1.7);
-        ctx.fillStyle = glow; ctx.fillRect(-unit * 0.7, -unit * 0.5, unit * 1.4, unit * 0.5);
-        break;
-    }
-    // destaque suave se for uma tarefa do jogador
-    if (mine) {
-      ctx.strokeStyle = 'rgba(255, 214, 64, 0.55)';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(-unit * 1.4, -unit * 1.3, unit * 2.8, unit * 2.6);
-    }
-    ctx.restore();
-  }
-
-  /** Hachura de placas do piso: recortada pelo contorno das salas. */
-  drawFloorTiles(spaces, corridors) {
-    const { ctx } = this;
-    ctx.save();
-    ctx.beginPath();
-    for (const g of [...spaces, ...corridors]) {
-      for (const shape of g.shapes || []) {
-        shape.points.forEach(([x, y], i) => {
-          const s = this.worldToScreen(x, y);
-          i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y);
-        });
-        ctx.closePath();
+    // tarefas do jogador no chão
+    if (state.you?.role === 'crew' && state.you.alive !== false) {
+      for (const t of state.you.tasks || []) {
+        if (t.done) continue;
+        for (const c of t.consoles) this.drawTaskMarker(c);
       }
     }
-    ctx.clip();
-    ctx.strokeStyle = 'rgba(255,255,255,0.07)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    const STEP = 1.6;
-    for (let x = -28; x <= 24; x += STEP) {
-      const a = this.worldToScreen(x, -19);
-      const b = this.worldToScreen(x, 11);
-      ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
-    }
-    for (let y = -19; y <= 11; y += STEP) {
-      const a = this.worldToScreen(-28, y);
-      const b = this.worldToScreen(24, y);
-      ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
-    }
-    ctx.stroke();
-    ctx.restore();
   }
 
-  /** Preenche uma planta (lista de polígonos) com uma cor. */
-  fillPlanWorld(shapes, color) {
+  fillPlanWorld(shapes, color, scale = 0) {
     const { ctx } = this;
     ctx.save();
     ctx.fillStyle = color;
     ctx.beginPath();
     for (const shape of shapes || []) {
-      shape.points.forEach(([x, y], i) => {
-        const s = this.worldToScreen(x, y);
+      const pts = shape.points || [];
+      pts.forEach(([x, y], i) => {
+        const s = this.worldToScreen(x, y + scale);
         i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y);
       });
       ctx.closePath();
@@ -297,102 +210,451 @@ export class Renderer {
     ctx.restore();
   }
 
-  /** Parede de uma sala: contorno de cada polígono da planta. */
-  strokePlanOutline(shapes, z) {
+  strokePlanOutline(shapes, z, thin = false) {
     const { ctx } = this;
     ctx.save();
-    ctx.strokeStyle = 'rgba(205, 224, 250, 0.95)';
-    ctx.lineWidth = 3.5;
+    // parede externa grossa + linha clara interna
     ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(24, 36, 54, 0.95)';
+    ctx.lineWidth = thin ? 6 : 8;
     ctx.beginPath();
     for (const shape of shapes || []) {
-      shape.points.forEach(([x, y], i) => {
+      (shape.points || []).forEach(([x, y], i) => {
         const s = this.worldToScreen(x, y);
         i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y);
       });
       ctx.closePath();
     }
     ctx.stroke();
-    ctx.restore();
-  }
-
-  /** Contorno de uma sala: arestas que não têm outra parte da mesma sala do lado. */
-  strokeUnionOutline(parts, z) {
-    const { ctx } = this;
-    const EPS = 0.12;
-    const covered = (x, y) => parts.some(([x1, y1, x2, y2]) =>
-      x >= x1 - EPS && x <= x2 + EPS && y >= y1 - EPS && y <= y2 + EPS);
-    ctx.save();
-    ctx.strokeStyle = 'rgba(205, 224, 250, 0.95)';
-    ctx.lineWidth = 3.5;
-    ctx.lineCap = 'square';
-    ctx.beginPath();
-    for (const [x1, y1, x2, y2] of parts) {
-      const mx = (x1 + x2) / 2;
-      const my = (y1 + y2) / 2;
-      if (!covered(mx, y2 + 0.25)) { const a = this.worldToScreen(x1, y2), b = this.worldToScreen(x2, y2); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
-      if (!covered(mx, y1 - 0.25)) { const a = this.worldToScreen(x1, y1), b = this.worldToScreen(x2, y1); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
-      if (!covered(x1 - 0.25, my)) { const a = this.worldToScreen(x1, y1), b = this.worldToScreen(x1, y2); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
-      if (!covered(x2 + 0.25, my)) { const a = this.worldToScreen(x2, y1), b = this.worldToScreen(x2, y2); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
-    }
+    ctx.strokeStyle = 'rgba(206, 226, 250, 0.95)';
+    ctx.lineWidth = 3;
     ctx.stroke();
     ctx.restore();
   }
 
-  /** Contorno da união: cada aresta só é desenhada se não houver vizinho do outro lado. */
-  strokeFloorOutline(parts, z) {
+  drawFloorTiles(spaces, corridors) {
     const { ctx } = this;
-    const EPS = 0.045;
-    const covered = (x, y) => parts.some(([x1, y1, x2, y2]) =>
-      x >= x1 - EPS && x <= x2 + EPS && y >= y1 - EPS && y <= y2 + EPS);
-
     ctx.save();
-    ctx.strokeStyle = 'rgba(128, 165, 220, 0.85)';
-    ctx.lineWidth = 3.5;
-    ctx.lineCap = 'square';
     ctx.beginPath();
-    for (const [x1, y1, x2, y2] of parts) {
-      const midX = (x1 + x2) / 2;
-      const midY = (y1 + y2) / 2;
-      const h = 0.06;
-      // topo / base
-      if (!covered(midX, y2 + 0.12)) { const a = this.worldToScreen(x1, y2); const b = this.worldToScreen(x2, y2); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
-      if (!covered(midX, y1 - 0.12)) { const a = this.worldToScreen(x1, y1); const b = this.worldToScreen(x2, y1); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
-      // esquerda / direita
-      if (!covered(x1 - 0.12, midY)) { const a = this.worldToScreen(x1, y1); const b = this.worldToScreen(x1, y2); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
-      if (!covered(x2 + 0.12, midY)) { const a = this.worldToScreen(x2, y1); const b = this.worldToScreen(x2, y2); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
+    for (const g of [...spaces, ...corridors]) {
+      for (const shape of g.shapes || []) {
+        (shape.points || []).forEach(([x, y], i) => {
+          const s = this.worldToScreen(x, y);
+          i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y);
+        });
+        ctx.closePath();
+      }
+    }
+    ctx.clip();
+    ctx.strokeStyle = 'rgba(255,255,255,0.055)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    const STEP = 1.8;
+    for (let x = -28; x <= 24; x += STEP) {
+      const a = this.worldToScreen(x, -20);
+      const b = this.worldToScreen(x, 12);
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+    }
+    for (let y = -20; y <= 12; y += STEP) {
+      const a = this.worldToScreen(-28, y);
+      const b = this.worldToScreen(24, y);
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
     }
     ctx.stroke();
+    // vinheta interna do piso
     ctx.restore();
   }
 
-  fillRectWorld([x1, y1, x2, y2], color) {
-    const { ctx } = this;
-    const a = this.worldToScreen(x1, y2);
-    const b = this.worldToScreen(x2, y1);
-    ctx.fillStyle = color;
-    ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y);
-  }
-
-  strokeRectWorld([x1, y1, x2, y2]) {
-    const { ctx } = this;
-    const a = this.worldToScreen(x1, y2);
-    const b = this.worldToScreen(x2, y1);
-    ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
-  }
-
-  drawRoomLabel(text, x, y, id) {
+  drawRoomLabel(text, x, y) {
     const { ctx } = this;
     const s = this.worldToScreen(x, y);
+    const label = String(text).toUpperCase();
     ctx.save();
-    ctx.fillStyle = 'rgba(232, 243, 255, 0.8)';
-    ctx.font = `700 ${Math.max(10, this.zoom * 0.48)}px "Trebuchet MS", sans-serif`;
+    ctx.font = `700 ${Math.max(9, this.zoom * 0.32)}px "Baloo 2", "Trebuchet MS", sans-serif`;
     ctx.textAlign = 'center';
-    ctx.fillText(text.toUpperCase(), s.x, s.y);
+    ctx.textBaseline = 'middle';
+    const w = ctx.measureText(label).width + this.zoom * 0.28;
+    const h = Math.max(12, this.zoom * 0.36);
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = 'rgba(18, 28, 44, 0.6)';
+    if (ctx.roundRect) {
+      ctx.beginPath();
+      ctx.roundRect(s.x - w / 2, s.y - h / 2, w, h, h / 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = 'rgba(232, 242, 255, 0.78)';
+    ctx.fillText(label, s.x, s.y + 0.5);
     ctx.restore();
   }
 
-  drawProp(p, z, state) {
+  /* ---------------- consoles ---------------- */
+  drawConsole(c, z, state) {
+    const { ctx } = this;
+    const s = this.worldToScreen(c.x, c.y);
+    const mine = (state.you?.tasks || []).find((t) => (t.consoles || []).some((x) => x.id === c.id && x.room === c.room));
+    const pulse = 0.55 + 0.35 * Math.sin(this.time * 2.4 + c.x);
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    const unit = z * 0.32;
+    const body = '#2b3950';
+    const edge = '#9abfe8';
+    const glow = `rgba(120, 220, 255, ${pulse})`;
+    const panel = (w, h, fill = body) => {
+      ctx.fillStyle = fill;
+      ctx.fillRect(-w / 2, -h / 2, w, h);
+      ctx.strokeStyle = edge;
+      ctx.lineWidth = 1.4;
+      ctx.strokeRect(-w / 2, -h / 2, w, h);
+    };
+    switch (c.task) {
+      case 'SwipeCard':
+        panel(unit * 2.2, unit * 1.5);
+        ctx.fillStyle = glow;
+        ctx.fillRect(-unit * 0.8, -unit * 0.45, unit * 1.6, unit * 0.28);
+        break;
+      case 'FixWiring':
+        panel(unit * 2, unit * 2);
+        ctx.strokeStyle = '#e8b64c';
+        ctx.lineWidth = 1.3;
+        ctx.beginPath();
+        ctx.moveTo(-unit * 0.6, -unit * 0.5);
+        ctx.lineTo(unit * 0.15, 0);
+        ctx.lineTo(-unit * 0.15, unit * 0.2);
+        ctx.lineTo(unit * 0.6, unit * 0.6);
+        ctx.stroke();
+        break;
+      case 'DownloadData':
+      case 'UploadData':
+        panel(unit * 2, unit * 1.6);
+        ctx.fillStyle = glow;
+        ctx.fillRect(-unit * 0.7, -unit * 0.45, unit * 1.4, unit * 0.9);
+        break;
+      case 'EmptyGarbage':
+      case 'FuelEngines':
+      case 'EmptyChute':
+        ctx.fillStyle = '#465a76';
+        ctx.fillRect(-unit * 1.2, -unit * 0.6, unit * 2.4, unit * 1.2);
+        ctx.strokeStyle = edge;
+        ctx.strokeRect(-unit * 1.2, -unit * 0.6, unit * 2.4, unit * 1.2);
+        ctx.fillStyle = '#e8b64c';
+        ctx.beginPath();
+        ctx.arc(0, 0, unit * 0.35, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      case 'DivertPower':
+        panel(unit * 2, unit * 2, '#20304a');
+        ctx.fillStyle = '#f0d25a';
+        ctx.beginPath();
+        ctx.moveTo(-unit * 0.2, -unit * 0.6);
+        ctx.lineTo(unit * 0.35, -unit * 0.05);
+        ctx.lineTo(0, -unit * 0.05);
+        ctx.lineTo(unit * 0.2, unit * 0.6);
+        ctx.lineTo(-unit * 0.35, unit * 0.05);
+        ctx.lineTo(0, unit * 0.05);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      case 'StartReactor':
+        panel(unit * 2.6, unit * 1.4, '#1f3a32');
+        ctx.strokeStyle = '#6ef0b5';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-unit * 0.5, unit * 0.3);
+        ctx.lineTo(unit * 0.5, -unit * 0.3);
+        ctx.stroke();
+        break;
+      case 'StabilizeSteering':
+        ctx.strokeStyle = edge;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, unit * 0.9, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-unit * 0.9, 0);
+        ctx.lineTo(unit * 0.9, 0);
+        ctx.moveTo(0, 0);
+        ctx.lineTo(0, unit * 0.9);
+        ctx.stroke();
+        break;
+      case 'PrimeShields':
+      case 'ClearAsteroids':
+        panel(unit * 2.2, unit * 1.8);
+        ctx.fillStyle = '#ff8a5c';
+        ctx.beginPath();
+        ctx.arc(0, 0, unit * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      case 'SubmitScan':
+        panel(unit * 2.2, unit * 2.4, '#20404a');
+        ctx.fillStyle = `rgba(120, 255, 220, ${pulse})`;
+        ctx.fillRect(-unit * 0.9, -unit * 1.0, unit * 1.8, unit * 0.25);
+        break;
+      default:
+        panel(unit * 2, unit * 1.7);
+        ctx.fillStyle = glow;
+        ctx.fillRect(-unit * 0.7, -unit * 0.5, unit * 1.4, unit * 0.5);
+        break;
+    }
+    if (mine) {
+      ctx.strokeStyle = 'rgba(255, 214, 64, 0.7)';
+      ctx.lineWidth = 1.6;
+      ctx.strokeRect(-unit * 1.4, -unit * 1.35, unit * 2.8, unit * 2.7);
+    }
+    ctx.restore();
+  }
+
+  drawTaskMarker(console_) {
+    const { ctx } = this;
+    const s = this.worldToScreen(console_.x, console_.y);
+    const pulse = 1 + Math.sin(this.time * 3.4) * 0.12;
+    ctx.save();
+    ctx.translate(s.x, s.y - this.zoom * 0.52);
+    ctx.scale(pulse, pulse);
+    const r = Math.max(7, this.zoom * 0.2);
+    ctx.fillStyle = 'rgba(255, 214, 64, 0.96)';
+    ctx.strokeStyle = 'rgba(60, 40, 0, 0.85)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, r * 0.9);
+    ctx.lineTo(-r * 0.85, -r * 0.5);
+    ctx.lineTo(r * 0.85, -r * 0.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#2a2200';
+    ctx.font = `bold ${Math.max(9, this.zoom * 0.26)}px "Baloo 2", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('!', 0, -r * 0.06);
+    ctx.restore();
+  }
+
+  /** Seta amarela na borda da tela apontando para a tarefa mais próxima. */
+  drawTaskArrow(state, me) {
+    if (!me || me.role !== 'crew' || me.alive === false) return;
+    const tasks = (state.you?.tasks || []).filter((t) => !t.done);
+    if (!tasks.length) return;
+    let best = null;
+    let bd = Infinity;
+    for (const t of tasks) {
+      for (const c of t.consoles) {
+        const d = Math.hypot(c.x - this.camera.x, c.y - this.camera.y);
+        if (d < bd) { bd = d; best = c; }
+      }
+    }
+    if (!best) return;
+    const s = this.worldToScreen(best.x, best.y);
+    const margin = 62;
+    const onScreen = s.x > margin && s.x < this.w - margin && s.y > margin && s.y < this.h - margin;
+    if (onScreen) return;
+    const { ctx } = this;
+    const cx = this.w / 2;
+    const cy = this.h / 2;
+    const ang = Math.atan2(s.y - cy, s.x - cx);
+    const rx = Math.min(cx, cy) - margin;
+    const px = cx + Math.cos(ang) * (this.w / 2 - margin);
+    const py = cy + Math.sin(ang) * (this.h / 2 - margin);
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(ang + Math.PI / 2);
+    ctx.fillStyle = 'rgba(255, 214, 64, 0.92)';
+    ctx.strokeStyle = 'rgba(50, 35, 0, 0.8)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, -14);
+    ctx.lineTo(11, 10);
+    ctx.lineTo(0, 4);
+    ctx.lineTo(-11, 10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    void rx;
+  }
+
+  /* ---------------- jogadores ---------------- */
+  smoothFor(p) {
+    let s = this.smooth.get(p.id);
+    if (!s) {
+      s = { x: p.x, y: p.y, walk: Math.random(), facing: p.facing || 1, moving: false, name: p.name };
+      this.smooth.set(p.id, s);
+    }
+    const dist = Math.hypot(p.x - s.x, p.y - s.y);
+    if (dist > 3.5) {
+      s.x = p.x;
+      s.y = p.y;
+    } else {
+      s.x = lerp(s.x, p.x, 0.35);
+      s.y = lerp(s.y, p.y, 0.35);
+    }
+    const speed = dist * 60;
+    s.moving = p.moving || speed > 0.15;
+    if (s.moving) s.walk += Math.min(0.09, 0.02 + speed * 0.004);
+    else s.walk = lerp(s.walk, Math.round(s.walk), 0.2);
+    if (p.facing) s.facing = p.facing;
+    return s;
+  }
+
+  drawPlayer(p, isMe, state) {
+    const { ctx } = this;
+    const col = COLORS[p.color] || COLORS[0];
+    const sm = this.smoothFor(p);
+    const s = this.worldToScreen(sm.x, sm.y);
+    const h = this.zoom * 0.98;
+    const ghost = !p.alive;
+
+    // nome (como no jogo: acima da cabeça)
+    ctx.save();
+    ctx.font = `700 ${Math.max(9, this.zoom * 0.30)}px "Baloo 2", "Trebuchet MS", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const label = p.name;
+    const by = s.y - h * 0.87;
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
+    ctx.shadowBlur = 4;
+    ctx.fillStyle = isMe ? '#a8eeff' : '#f4f9ff';
+    ctx.fillText(label, s.x, by + 0.5);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+
+    drawCrew(ctx, {
+      x: s.x,
+      y: s.y,
+      h,
+      color: col.hex,
+      facing: sm.facing,
+      walk: sm.walk,
+      phase: this.time * 3,
+      ghost,
+      alpha: ghost ? 0.55 : 1,
+      highlight: false,
+    });
+  }
+
+  drawGhost(p, state) {
+    const { ctx } = this;
+    const col = COLORS[p.color] || COLORS[0];
+    const sm = this.smoothFor(p);
+    const s = this.worldToScreen(sm.x, sm.y);
+    const h = this.zoom * 0.95;
+    ctx.save();
+    // aura do fantasma
+    const grad = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, h * 0.9);
+    grad.addColorStop(0, 'rgba(170, 220, 255, 0.16)');
+    grad.addColorStop(1, 'rgba(170, 220, 255, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(s.x - h, s.y - h, h * 2, h * 2);
+    ctx.restore();
+    drawCrew(ctx, {
+      x: s.x,
+      y: s.y,
+      h,
+      color: col.hex,
+      facing: sm.facing,
+      walk: sm.walk,
+      phase: this.time * 2.4,
+      ghost: true,
+      alpha: 0.5,
+      outline: false,
+    });
+    const { ctx: c2 } = this;
+    c2.save();
+    c2.globalAlpha = 0.5;
+    c2.fillStyle = 'rgba(220, 238, 255, 0.9)';
+    c2.font = `700 ${Math.max(8, this.zoom * 0.26)}px "Baloo 2", sans-serif`;
+    c2.textAlign = 'center';
+    c2.fillText(p.name, s.x, s.y - h * 0.8);
+    c2.restore();
+    void state;
+  }
+
+  drawBody(body, state) {
+    const { ctx } = this;
+    const col = COLORS[body.color] || COLORS[0];
+    const s = this.worldToScreen(body.x, body.y);
+    const h = this.zoom * 0.95;
+    // halo de "corpo" para facilitar achar
+    const pulse = 0.5 + 0.5 * Math.sin(this.time * 2);
+    ctx.save();
+    ctx.globalAlpha = 0.10 + pulse * 0.08;
+    ctx.fillStyle = '#ff3b4e';
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, h * 0.62, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    drawCorpse(ctx, { x: s.x, y: s.y, h, color: col.hex, rotation: (body.x * 13) % 1 + 0.2, t: this.time });
+    void state;
+  }
+
+  drawKills() {
+    const now = performance.now();
+    this.kills = this.kills.filter((k) => now - k.t0 < 1100);
+    const { ctx } = this;
+    for (const k of this.kills) {
+      const t = (now - k.t0) / 1100;
+      const s = this.worldToScreen(k.x, k.y);
+      const h = this.zoom;
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      // clarão + respingos
+      ctx.globalAlpha = 1 - t;
+      ctx.fillStyle = 'rgba(255, 240, 240, 0.85)';
+      ctx.beginPath();
+      ctx.arc(0, 0, h * (0.25 + t * 0.5), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(200, 20, 40, 0.85)';
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2 + k.x;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * h * 0.1, Math.sin(a) * h * 0.1);
+        ctx.lineTo(Math.cos(a) * h * (0.25 + t * 0.45), Math.sin(a) * h * (0.25 + t * 0.45));
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  drawVents(vents, me) {
+    for (const v of vents) {
+      const s = this.worldToScreen(v.x, v.y);
+      const near = me && Math.hypot(v.x - (me.x ?? 0), v.y - (me.y ?? 0)) < 1.5;
+      drawVent(this.ctx, {
+        x: s.x,
+        y: s.y,
+        size: this.zoom * 0.5,
+        open: me?.ventId === v.id ? 1 : 0,
+        active: me?.ventId === v.id,
+        highlight: near,
+      });
+    }
+  }
+
+  drawDoors(state) {
+    const now = Date.now();
+    for (const d of state.ship?.doors || []) {
+      const s = this.worldToScreen(d.x, d.y);
+      let closed = 0;
+      if (!d.open) {
+        const remaining = d.closesIn ?? 6000;
+        closed = Math.min(1, Math.max(0, 1 - remaining / 400));
+      }
+      drawDoor(this.ctx, {
+        x: s.x,
+        y: s.y,
+        size: this.zoom * 0.5,
+        closed: d.open ? 0 : Math.max(0.2, closed),
+        orientation: d.orientation || 'h',
+      });
+      void now;
+    }
+  }
+
+  /* ---------------- props ---------------- */
+  drawProp(p, z) {
     const { ctx } = this;
     const s = this.worldToScreen(p.x, p.y);
     ctx.save();
@@ -400,80 +662,82 @@ export class Renderer {
     switch (p.type) {
       case 'table': {
         const r = (p.r || 0.95) * z;
-        ctx.fillStyle = '#54637a';
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
         ctx.beginPath();
-        ctx.ellipse(0, 0, r, r * 1.08, 0, 0, Math.PI * 2);
+        ctx.ellipse(0, r * 0.25, r * 1.02, r * 0.4, 0, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = '#8fa3bd';
+        ctx.fillStyle = '#4a5a70';
         ctx.beginPath();
-        ctx.ellipse(0, -r * 0.06, r * 0.82, r * 0.9, 0, 0, Math.PI * 2);
+        ctx.ellipse(0, 0, r, r * 0.78, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#8ba1bd';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, r * 0.82, r * 0.62, 0, 0, Math.PI * 2);
         ctx.fill();
         break;
       }
-      case 'chair': {
-        ctx.fillStyle = '#465268';
+      case 'chair':
+        ctx.globalAlpha = 0.65;
+        ctx.fillStyle = '#39455a';
         ctx.beginPath();
         ctx.arc(0, 0, 0.3 * z, 0, Math.PI * 2);
         ctx.fill();
         break;
-      }
       case 'engine': {
         const r = (p.r || 1.6) * z;
-        ctx.strokeStyle = 'rgba(150, 190, 240, 0.55)';
-        ctx.lineWidth = Math.max(2, 2.2 * z * 0.12);
+        ctx.strokeStyle = 'rgba(150, 190, 240, 0.5)';
+        ctx.lineWidth = Math.max(2, 2.2 * z * 0.1);
         ctx.beginPath();
         ctx.arc(0, 0, r, 0, Math.PI * 2);
         ctx.stroke();
         ctx.beginPath();
-        ctx.moveTo(-r, -r); ctx.lineTo(r, r);
-        ctx.moveTo(-r, r); ctx.lineTo(r, -r);
+        ctx.moveTo(-r, -r);
+        ctx.lineTo(r, r);
+        ctx.moveTo(-r, r);
+        ctx.lineTo(r, -r);
         ctx.stroke();
         break;
       }
-      case 'reactor': {
-        const r = (p.r || 1.5) * z;
-        ctx.strokeStyle = 'rgba(120, 255, 190, 0.5)';
-        ctx.lineWidth = Math.max(2, 2.4 * z * 0.12);
-        ctx.beginPath();
-        ctx.arc(0, 0, r, 0, Math.PI * 2);
-        ctx.stroke();
-        break;
-      }
+      case 'reactor':
       case 'shieldGen': {
-        const r = (p.r || 1.4) * z;
-        ctx.strokeStyle = 'rgba(140, 200, 255, 0.55)';
-        ctx.lineWidth = Math.max(2, 2 * z * 0.12);
+        const r = (p.r || 1.5) * z;
+        ctx.strokeStyle = p.type === 'reactor' ? 'rgba(120, 255, 190, 0.45)' : 'rgba(140, 200, 255, 0.5)';
+        ctx.lineWidth = Math.max(2, 2.4 * z * 0.1);
         ctx.beginPath();
         ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(120, 200, 255, 0.22)';
+        ctx.beginPath();
+        ctx.arc(0, 0, r * 0.66, 0, Math.PI * 2);
         ctx.stroke();
         break;
       }
       case 'bed': {
-        const w = (p.w || 1.5) * z, h = (p.h || 0.9) * z;
+        const w = (p.w || 1.5) * z;
+        const h = (p.h || 0.9) * z;
         ctx.fillStyle = '#dfe8f5';
         ctx.fillRect(-w / 2, -h / 2, w, h);
         ctx.fillStyle = '#9fb8d6';
         ctx.fillRect(-w / 2, -h / 2, w, h * 0.35);
         break;
       }
-      case 'plant': {
+      case 'plant':
         ctx.fillStyle = '#2f6b47';
         ctx.beginPath();
         ctx.arc(0, 0, 0.42 * z, 0, Math.PI * 2);
         ctx.fill();
         break;
-      }
       case 'bench': {
-        const w = (p.w || 2) * z, h = (p.h || 0.7) * z;
+        const w = (p.w || 2) * z;
+        const h = (p.h || 0.7) * z;
         ctx.fillStyle = '#33507a';
         ctx.fillRect(-w / 2, -h / 2, w, h);
         break;
       }
-      case 'trash': {
+      case 'trash':
         ctx.fillStyle = '#4a5c78';
         ctx.fillRect(-0.35 * z, -0.45 * z, 0.7 * z, 0.9 * z);
         break;
-      }
       case 'fuel': {
         const w = (p.w || 1.1) * z;
         ctx.fillStyle = '#b8873a';
@@ -481,7 +745,8 @@ export class Renderer {
         break;
       }
       case 'panel': {
-        const w = (p.w || 1.2) * z, h = (p.h || 0.5) * z;
+        const w = (p.w || 1.2) * z;
+        const h = (p.h || 0.5) * z;
         ctx.fillStyle = '#24344d';
         ctx.fillRect(-w / 2, -h / 2, w, h);
         ctx.strokeStyle = '#4f7099';
@@ -494,11 +759,8 @@ export class Renderer {
         const h = (p.h || 0.7) * z;
         ctx.fillStyle = '#39506f';
         ctx.fillRect(-w / 2, -h / 2, w, h);
-        ctx.fillStyle = 'rgba(120, 220, 255, 0.85)';
+        ctx.fillStyle = 'rgba(120, 220, 255, 0.8)';
         ctx.fillRect(-w / 2 + 2, -h / 2 + 2, w - 4, h / 2.4);
-        ctx.strokeStyle = '#7ea6d8';
-        ctx.lineWidth = 1.5;
-        ctx.strokeRect(-w / 2, -h / 2, w, h);
         break;
       }
       case 'crate': {
@@ -507,7 +769,7 @@ export class Renderer {
         ctx.fillStyle = '#6b4a2b';
         ctx.fillRect(-w / 2, -h / 2, w, h);
         ctx.strokeStyle = '#a97b4a';
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 1.4;
         ctx.strokeRect(-w / 2, -h / 2, w, h);
         ctx.beginPath();
         ctx.moveTo(-w / 2, -h / 2);
@@ -523,203 +785,195 @@ export class Renderer {
     ctx.restore();
   }
 
-  drawTaskMarker(console_, state) {
+  /* ---------------- escuridão / visão ---------------- */
+  drawVision(state, me, dark, vision, lightsOut) {
     const { ctx } = this;
-    const s = this.worldToScreen(console_.x, console_.y);
-    const t = (performance.now() / 1000) % 2;
-    const pulse = 1 + Math.sin(t * Math.PI * 2) * 0.15;
-    ctx.save();
-    ctx.translate(s.x, s.y);
-    ctx.scale(pulse, pulse);
-    ctx.fillStyle = 'rgba(255, 214, 64, 0.92)';
-    ctx.beginPath();
-    ctx.arc(0, 0, Math.max(6, this.zoom * 0.3), 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#2a2200';
-    ctx.font = `bold ${Math.max(9, this.zoom * 0.34)}px "Trebuchet MS"`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('!', 0, 1);
-    ctx.restore();
-  }
+    const oc = this.overlayCtx;
+    if (!oc) return;
+    const W = this.overlay.width;
+    const H = this.overlay.height;
+    oc.setTransform(1, 0, 0, 1, 0, 0);
+    oc.clearRect(0, 0, W, H);
+    const c = me
+      ? this.worldToScreen(state.__meX ?? me.x ?? 0, state.__meY ?? me.y ?? 0)
+      : { x: this.w / 2, y: this.h / 2 };
+    const px = c.x * this.dpr;
+    const py = c.y * this.dpr;
+    const radiusWorld = (lightsOut ? 2.7 : 5.4) * Math.max(0.45, vision);
+    const R = Math.max(70, radiusWorld * this.zoom * this.dpr);
 
-  drawVents(vents, z, me) {
-    const { ctx } = this;
-    for (const v of vents) {
-      const s = this.worldToScreen(v.x, v.y);
-      const active = me?.ventId === v.id;
+    oc.fillStyle = `rgba(3, 6, 12, ${dark})`;
+    oc.fillRect(0, 0, W, H);
+    oc.globalCompositeOperation = 'destination-out';
+    const g = oc.createRadialGradient(px, py, R * 0.35, px, py, R);
+    g.addColorStop(0, 'rgba(0,0,0,0.98)');
+    g.addColorStop(0.6, 'rgba(0,0,0,0.72)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    oc.fillStyle = g;
+    oc.beginPath();
+    oc.arc(px, py, R, 0, Math.PI * 2);
+    oc.fill();
+    oc.globalCompositeOperation = 'source-over';
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(this.overlay, 0, 0);
+    ctx.restore();
+
+    if (lightsOut) {
+      // brilho residual nas lâmpadas
       ctx.save();
-      ctx.translate(s.x, s.y);
-      ctx.fillStyle = active ? 'rgba(120, 255, 200, 0.7)' : 'rgba(90, 200, 255, 0.35)';
-      ctx.beginPath();
-      ctx.roundRect(-0.42 * z, -0.32 * z, 0.84 * z, 0.64 * z, 0.12 * z);
-      ctx.fill();
-      ctx.strokeStyle = active ? 'rgba(180, 255, 230, 0.95)' : 'rgba(150, 225, 255, 0.75)';
-      ctx.lineWidth = 1.6;
-      ctx.stroke();
-      ctx.beginPath();
-      for (let i = -1; i <= 1; i++) {
-        ctx.moveTo(-0.24 * z, i * 0.15 * z);
-        ctx.lineTo(0.24 * z, i * 0.15 * z);
+      ctx.globalAlpha = 0.08;
+      ctx.fillStyle = '#7fd4ff';
+      for (const sp of state.ship?.spaces || []) {
+        const [x1, , x2, y2] = sp.bounds || [0, 0, 0, 0];
+        const s = this.worldToScreen((x1 + x2) / 2, y2 - 2);
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, this.zoom * 0.5, 0, Math.PI * 2);
+        ctx.fill();
       }
-      ctx.stroke();
       ctx.restore();
     }
-  }
-
-  drawPlayer(p, isMe, z, state) {
-    const { ctx } = this;
-    const col = COLORS[p.color] || COLORS[0];
-    const s = this.worldToScreen(p.x, p.y);
-    const bob = p.moving ? Math.sin(performance.now() / 110) * 0.05 * z : 0;
-    ctx.save();
-    ctx.translate(s.x, s.y + bob);
-    const bodyH = 0.86 * z;
-    const bodyW = 0.66 * z;
-
-    if (isMe) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.ellipse(0, 0.1 * z, 0.62 * z, 0.44 * z, 0, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    // sombra
-    ctx.fillStyle = 'rgba(0,0,0,0.4)';
-    ctx.beginPath();
-    ctx.ellipse(0, 0.4 * z, 0.36 * z, 0.14 * z, 0, 0, Math.PI * 2);
-    ctx.fill();
-    this.drawBean(0, 0, col.hex, col.visor, bodyW, bodyH, p.facing, isMe, state?.you?.role === 'impostor' && p.role === 'impostor');
-    // nome
-    ctx.font = `700 ${Math.max(9, z * 0.36)}px "Trebuchet MS"`;
-    ctx.textAlign = 'center';
-    const label = p.name;
-    const w = ctx.measureText(label).width + 8;
-    ctx.fillStyle = 'rgba(4,8,14,0.72)';
-    ctx.beginPath();
-    ctx.roundRect(-w / 2, -0.95 * z, w, 0.38 * z, 0.1 * z);
-    ctx.fill();
-    ctx.fillStyle = isMe ? '#8fe9ff' : 'rgba(232,240,255,0.92)';
-    ctx.fillText(label, 0, -0.68 * z);
-    ctx.restore();
-  }
-
-  drawBean(x, y, color, visor, w, h, facing, isMe, impMate) {
-    const { ctx } = this;
-    ctx.save();
-    ctx.translate(x, y);
-    if (facing < 0) ctx.scale(-1, 1);
-    // corpo
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.roundRect(-w / 2, -h * 0.62, w, h, w * 0.42);
-    ctx.fill();
-    // pernas
-    ctx.beginPath();
-    ctx.ellipse(-w * 0.2, h * 0.34, w * 0.2, h * 0.17, 0, 0, Math.PI * 2);
-    ctx.ellipse(w * 0.2, h * 0.34, w * 0.2, h * 0.17, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // mochila
-    ctx.fillStyle = 'rgba(0,0,0,0.32)';
-    ctx.beginPath();
-    ctx.roundRect(-w * 0.62, -h * 0.42, w * 0.22, h * 0.6, w * 0.1);
-    ctx.fill();
-    // visor
-    ctx.fillStyle = '#a8e0ef';
-    ctx.beginPath();
-    ctx.roundRect(-w * 0.05, -h * 0.44, w * 0.55, h * 0.34, h * 0.17);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    ctx.beginPath();
-    ctx.roundRect(w * 0.16, -h * 0.38, w * 0.24, h * 0.12, h * 0.06);
-    ctx.fill();
-    if (impMate) {
-      ctx.fillStyle = '#ff4a5e';
-      ctx.font = `bold ${Math.max(9, w * 0.8)}px "Trebuchet MS"`;
-      ctx.textAlign = 'center';
-      ctx.fillText('▲', 0, -h * 0.78);
-    }
-    ctx.restore();
-  }
-
-  drawGhost(p, z, state) {
-    const { ctx } = this;
-    const col = COLORS[p.color] || COLORS[0];
-    const s = this.worldToScreen(p.x, p.y);
-    ctx.save();
-    ctx.translate(s.x, s.y + Math.sin(performance.now() / 500) * 0.06 * z);
-    ctx.globalAlpha = 0.42;
-    this.drawBean(0, 0, col.hex, col.visor, 0.6 * z, 0.8 * z, p.facing, false);
-    ctx.restore();
-    ctx.save();
-    ctx.globalAlpha = 0.5;
-    ctx.fillStyle = 'rgba(232,240,255,0.85)';
-    ctx.font = `700 ${Math.max(8, z * 0.3)}px "Trebuchet MS"`;
-    ctx.textAlign = 'center';
-    ctx.fillText(p.name, s.x, s.y - 0.9 * z);
-    ctx.restore();
-  }
-
-  drawBody(body, z) {
-    const { ctx } = this;
-    const col = COLORS[body.color] || COLORS[0];
-    const s = this.worldToScreen(body.x, body.y);
-    ctx.save();
-    ctx.translate(s.x, s.y);
-    // poça/aura vermelha
-    const t = (performance.now() / 900) % 1;
-    ctx.fillStyle = `rgba(180, 20, 40, ${0.18 + Math.sin(t * Math.PI) * 0.08})`;
-    ctx.beginPath();
-    ctx.arc(0, 0, 0.75 * z, 0, Math.PI * 2);
-    ctx.fill();
-    // corpo caído (girado)
-    ctx.rotate(Math.PI / 2.1);
-    this.drawBean(0, 0, col.hex, col.visor, 0.58 * z, 0.78 * z, 1, false);
-    ctx.rotate(-Math.PI / 2.1);
-    // osso
-    ctx.fillStyle = '#eef3ff';
-    ctx.beginPath();
-    ctx.ellipse(0, 0.44 * z, 0.26 * z, 0.1 * z, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  drawVision(me, state, dark, vision) {
-    const { ctx } = this;
-    // círculo de visão ao redor do jogador
-    const center = me ? this.worldToScreen(state.__meX ?? me.x ?? 0, state.__meY ?? me.y ?? 0) : { x: this.w / 2, y: this.h / 2 };
-    // No jogo a visão é um círculo ao redor do tripulante: claro no centro,
-    // escuro nas bordas. Um único gradiente radial cobre a tela inteira.
-    const worldR = (state.lightsOut ? 2.4 : 5.2) * Math.max(0.5, vision / 1);
-    const radius = Math.max(worldR * this.zoom, 60);
-    // penumbra do jogo: perto é claro, longe fica escuro mas o navio continua visível
-    const grad = ctx.createRadialGradient(center.x, center.y, radius * 0.6, center.x, center.y, radius * 1.5);
-    grad.addColorStop(0, 'rgba(2,5,12,0)');
-    grad.addColorStop(0.45, `rgba(2,5,12,${dark * 0.22})`);
-    grad.addColorStop(1, `rgba(2,5,12,${dark * 0.72})`);
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, this.w, this.h);
   }
 
   drawCommsStatic() {
     const { ctx } = this;
     ctx.save();
-    ctx.globalAlpha = 0.10;
-    ctx.fillStyle = '#7fffd4';
-    for (let i = 0; i < 220; i++) {
-      ctx.fillRect(Math.random() * this.w, Math.random() * this.h, 2, 2);
+    ctx.globalAlpha = 0.07;
+    ctx.fillStyle = '#8affe0';
+    for (let i = 0; i < 90; i++) {
+      ctx.fillRect(Math.random() * this.w, Math.random() * this.h, 2, 1);
     }
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = 'rgba(255, 90, 90, 0.85)';
+    ctx.font = `700 ${Math.max(11, this.w * 0.012)}px "Baloo 2", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('COMUNICAÇÃO FORA DO AR', this.w / 2, 26);
     ctx.restore();
   }
 
   drawElectricalFlicker() {
     const { ctx } = this;
-    const flicker = Math.sin(performance.now() / 90) > 0.85;
-    if (!flicker) return;
+    if (Math.sin(this.time * 7.3) <= 0.82) return;
     ctx.save();
-    ctx.globalAlpha = 0.06;
+    ctx.globalAlpha = 0.07;
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, this.w, this.h);
     ctx.restore();
+  }
+
+  /** Desenha o mapa (Tab) num canvas separado. */
+  drawMinimap(canvas, state, me, colors) {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = canvas.clientWidth || 520;
+    const h = canvas.clientHeight || 320;
+    canvas.width = Math.floor(w * dpr);
+    canvas.height = Math.floor(h * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    const spaces = state.ship?.spaces || [];
+    const corridors = state.ship?.corridors || [];
+    let x1 = Infinity; let y1 = Infinity; let x2 = -Infinity; let y2 = -Infinity;
+    for (const g of [...spaces, ...corridors]) {
+      for (const sh of g.shapes || []) {
+        for (const [px, py] of sh.points || []) {
+          x1 = Math.min(x1, px); y1 = Math.min(y1, py);
+          x2 = Math.max(x2, px); y2 = Math.max(y2, py);
+        }
+      }
+    }
+    const pad = 26;
+    const scale = Math.min((w - pad * 2) / (x2 - x1), (h - pad * 2) / (y2 - y1));
+    const ox = (w - (x2 - x1) * scale) / 2;
+    const oy = (h - (y2 - y1) * scale) / 2;
+    const toS = (px, py) => [ox + (px - x1) * scale, oy + (y2 - py) * scale];
+
+    const path = (shapes) => {
+      ctx.beginPath();
+      for (const sh of shapes || []) {
+        (sh.points || []).forEach(([px, py], i) => {
+          const [sx, sy] = toS(px, py);
+          i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy);
+        });
+        ctx.closePath();
+      }
+    };
+
+    for (const c of corridors) {
+      path(c.shapes);
+      ctx.fillStyle = '#5f7294';
+      ctx.fill();
+    }
+    for (const sp of spaces) {
+      path(sp.shapes);
+      ctx.fillStyle = '#7c90b3';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(220, 236, 255, 0.85)';
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+      const [bx1, , bx2, by2] = sp.bounds || [0, 0, 0, 0];
+      const [lx, ly] = toS((bx1 + bx2) / 2, by2 - 0.9);
+      ctx.fillStyle = 'rgba(240, 248, 255, 0.92)';
+      ctx.font = '700 10px "Baloo 2", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(String(sp.name).toUpperCase(), lx, ly);
+    }
+
+    const colorOf = (idx) => colors?.find((c) => c.id === idx)?.hex || '#c51111';
+
+    // tarefas
+    if (me?.role === 'crew') {
+      for (const t of state.you?.tasks || []) {
+        if (t.done) continue;
+        for (const c of t.consoles || []) {
+          const [sx, sy] = toS(c.x, c.y);
+          ctx.fillStyle = '#ffd640';
+          ctx.beginPath();
+          ctx.arc(sx, sy, 3.2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+    // sabotagem
+    if (state.sabotage) {
+      const room = spaces.find((s) => s.id === state.sabotage.roomId);
+      if (room) {
+        const [bx1, , bx2, by2] = room.bounds || [0, 0, 0, 0];
+        const [sx, sy] = toS((bx1 + bx2) / 2, (by2 + (room.bounds?.[1] || by2)) / 2);
+        ctx.strokeStyle = `rgba(255, 60, 70, ${0.55 + 0.4 * Math.sin(this.time * 6)})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 14, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    // outros jogadores (só impostor vê todos, como no jogo)
+    if (me?.role === 'impostor') {
+      for (const p of state.players) {
+        if (!p.alive || p.id === me.id) continue;
+        const [sx, sy] = toS(p.x, p.y);
+        ctx.fillStyle = colorOf(p.color);
+        ctx.beginPath();
+        ctx.arc(sx, sy, 3.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    // você
+    const meP = state.players.find((p) => p.id === me?.id);
+    if (meP) {
+      const [sx, sy] = toS(meP.x, meP.y);
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.fillStyle = colorOf(meP.color);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, 6.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 }
